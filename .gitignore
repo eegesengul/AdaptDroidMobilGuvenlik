@@ -1,0 +1,49 @@
+# APK dosyaları (çok büyük, repo'ya girmiyor)
+data/apks/
+data/dynamic_logs/
+
+# Feature parquet ve CSV'ler (büyük olabilir, opsiyonel)
+# data/features/     <- bu satırı yorum dışı bırakırsan feature'lar da girmez
+
+# Modeller
+models/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Sanal ortam
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# API anahtarları — KESİNLİKLE repo'ya girmesin
+.env
+secrets.py
+api_keys.txt
+
+# Geçici build klasörleri
+docxbuild/
+node_modules/
+*.lock
+package-lock.json
