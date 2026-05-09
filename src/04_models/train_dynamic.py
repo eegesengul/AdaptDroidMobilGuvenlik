@@ -1,4 +1,4 @@
-"""
+﻿"""
 Dinamik feature'larla LightGBM modeli eğitir.
 Kullanım:
     python train_dynamic.py
@@ -74,7 +74,7 @@ def main():
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = MODELS_DIR / "dynamic_model.pkl"
     joblib.dump({"model": model, "feature_cols": feat_cols}, out_path)
-    print(f"\nModel kaydedildi → {out_path}")
+    print(f"\nModel kaydedildi -> {out_path}")
 
 
 if __name__ == "__main__":

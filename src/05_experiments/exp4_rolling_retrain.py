@@ -1,4 +1,4 @@
-"""
+﻿"""
 Deney 4 — Rolling Retraining
 Her yeni yıl geldikçe o yılın verisiyle model yeniden eğitilir.
 Performans stabilizasyonu ölçülür.
@@ -88,7 +88,7 @@ def main():
 
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
     df_res.to_csv(TABLES_DIR / "exp4_results.csv", index=False)
-    print(f"\nSonuçlar → {TABLES_DIR / 'exp4_results.csv'}")
+    print(f"\nSonuçlar -> {TABLES_DIR / 'exp4_results.csv'}")
 
     # Grafik
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -104,7 +104,7 @@ def main():
     ax.set_xticks(years)
     plt.tight_layout()
     fig.savefig(FIGURES_DIR / "exp4_rolling_retrain.png", dpi=150)
-    print(f"Grafik → {FIGURES_DIR / 'exp4_rolling_retrain.png'}")
+    print(f"Grafik -> {FIGURES_DIR / 'exp4_rolling_retrain.png'}")
 
 
 if __name__ == "__main__":

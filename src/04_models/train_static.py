@@ -1,4 +1,4 @@
-"""
+﻿"""
 Statik feature'larla LightGBM modeli eğitir.
 Kullanım:
     python train_static.py
@@ -86,7 +86,7 @@ def main():
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     model_path = MODELS_DIR / "static_model.pkl"
     joblib.dump({"model": model, "feature_cols": feat_cols}, model_path)
-    print(f"\nModel kaydedildi → {model_path}")
+    print(f"\nModel kaydedildi -> {model_path}")
 
 
 if __name__ == "__main__":

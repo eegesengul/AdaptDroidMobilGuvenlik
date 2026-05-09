@@ -1,4 +1,4 @@
-"""
+﻿"""
 Deney 5 — Behavioral Fingerprinting
 Malware örneklerini davranışsal dönem kümelerine ayırır.
 K-Means + PCA görselleştirme ile hangi yıl hangi davranışa benzediği analiz edilir.
@@ -60,7 +60,7 @@ def main():
     malware = malware.copy()
     malware["cluster"] = kmeans.fit_predict(X_scaled)
 
-    # PCA → 2D görselleştirme
+    # PCA -> 2D görselleştirme
     pca     = PCA(n_components=2, random_state=RANDOM_SEED)
     coords  = pca.fit_transform(X_scaled)
     malware["pca_x"] = coords[:, 0]
@@ -109,7 +109,7 @@ def main():
 
     plt.tight_layout()
     fig.savefig(FIGURES_DIR / "exp5_fingerprinting.png", dpi=150)
-    print(f"\nGrafik → {FIGURES_DIR / 'exp5_fingerprinting.png'}")
+    print(f"\nGrafik -> {FIGURES_DIR / 'exp5_fingerprinting.png'}")
 
     # Küme başına en ayırt edici featurelar
     print("\n── Küme Başına En Önemli Feature'lar ──")

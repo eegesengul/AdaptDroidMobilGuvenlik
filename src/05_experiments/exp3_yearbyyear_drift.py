@@ -1,4 +1,4 @@
-"""
+﻿"""
 Deney 3 — Year-by-Year Drift Analizi
 Her yıl için model performansını ölçer ve drift grafiği üretir.
 4 model karşılaştırılır: Static, Dynamic, Fixed Hybrid, Adaptive Hybrid.
@@ -119,7 +119,7 @@ def main():
     ax.set_xticks(df_res.year.tolist())
     plt.tight_layout()
     fig.savefig(FIGURES_DIR / "exp3_drift_f1.png", dpi=150)
-    print(f"\nGrafik kaydedildi → {FIGURES_DIR / 'exp3_drift_f1.png'}")
+    print(f"\nGrafik kaydedildi -> {FIGURES_DIR / 'exp3_drift_f1.png'}")
 
 
 if __name__ == "__main__":

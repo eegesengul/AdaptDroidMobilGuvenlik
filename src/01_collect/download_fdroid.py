@@ -1,4 +1,4 @@
-"""
+﻿"""
 F-Droid'dan yıl bazlı benign APK indirme scripti.
 Kullanım:
     python download_fdroid.py --years 2019 2020 2021
@@ -26,7 +26,7 @@ def fetch_index() -> dict:
 
 
 def collect_candidates(index: dict, target_years: list) -> dict:
-    """Yıl → APK URL listesi döner."""
+    """Yıl -> APK URL listesi döner."""
     candidates = {y: [] for y in target_years}
 
     for pkg_name, pkg_data in index.get("packages", {}).items():

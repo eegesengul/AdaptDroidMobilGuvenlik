@@ -90,6 +90,7 @@ def main():
     parser.add_argument("--index", required=True, help="androzoo_latest.csv.gz yolu")
     parser.add_argument("--years", nargs="+", type=int, default=list(APK_TARGETS.keys()))
     parser.add_argument("--only", choices=["malware", "benign", "both"], default="both")
+    parser.add_argument("--limit", type=int, default=None, help="Her yıl/label için max APK (test için)")
     args = parser.parse_args()
 
     if ANDROZOO_API_KEY == "ANDROZOO_KEY_BURAYA":
@@ -100,6 +101,9 @@ def main():
 
     for year in args.years:
         mal_count, ben_count = APK_TARGETS.get(year, [0, 0])
+        if args.limit:
+            mal_count = min(mal_count, args.limit)
+            ben_count = min(ben_count, args.limit)
         print(f"\n── {year} ──────────────────────────")
         if args.only in ("malware", "both"):
             download_for_year(df, year, label=1, count=mal_count, api_key=ANDROZOO_API_KEY)

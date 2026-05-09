@@ -1,4 +1,4 @@
-"""
+﻿"""
 Deney 1 — Random Split Baseline
 Klasik %80/%20 random split ile baseline performans.
 Amaç: Temporal split ile karşılaştırma referansı oluşturmak.
@@ -61,7 +61,7 @@ def main():
     # Kaydet
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
     pd.DataFrame([results]).to_csv(TABLES_DIR / "exp1_results.csv", index=False)
-    print(f"\nSonuçlar kaydedildi → {TABLES_DIR / 'exp1_results.csv'}")
+    print(f"\nSonuçlar kaydedildi -> {TABLES_DIR / 'exp1_results.csv'}")
 
 
 if __name__ == "__main__":

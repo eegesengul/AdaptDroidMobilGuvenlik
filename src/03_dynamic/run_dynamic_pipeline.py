@@ -1,6 +1,6 @@
-"""
+﻿"""
 Android emülatör üzerinde Frida destekli dinamik analiz pipeline.
-Adımlar: install → frida attach → logcat clear → launch → monkey → hook monitoring → feature → uninstall
+Adımlar: install -> frida attach -> logcat clear -> launch -> monkey -> hook monitoring -> feature -> uninstall
 
 Kullanım:
     python run_dynamic_pipeline.py
@@ -110,7 +110,6 @@ def frida_attach(package: str, frida_log_path: str) -> "subprocess.Popen | None"
         script.on("message", on_message)
         script.load()
 
-        # Arka planda olayları kaydet
         import threading, time as _time
 
         def _writer():
@@ -136,17 +135,38 @@ def parse_logcat(log_path: str) -> dict:
         log = ""
 
     return {
-        "network_event_count":   len(re.findall(r"connect|socket|http|https", log, re.I)),
-        "dns_query_count":       len(re.findall(r"getaddrinfo|nslookup|resolv", log, re.I)),
-        "crypto_count":          len(re.findall(r"javax\.crypto|AES|RSA|Cipher", log)),
-        "dex_loader_count":      len(re.findall(r"DexClassLoader|loadDex|BaseDex", log)),
-        "runtime_exec_count":    len(re.findall(r"Runtime\.exec|ProcessBuilder|/bin/sh", log)),
-        "sms_send_count":        len(re.findall(r"sendTextMessage|SmsManager", log)),
-        "contact_access_count":  len(re.findall(r"ContactsContract|getContacts|CONTACTS", log)),
-        "file_write_count":      len(re.findall(r"FileOutputStream|openFileOutput|FileWriter", log)),
-        "reflection_count":      len(re.findall(r"getDeclaredMethod|\.invoke\(|forName", log)),
-        "native_lib_count":      len(re.findall(r"System\.loadLibrary|dlopen", log)),
-        "exception_count":       len(re.findall(r"Exception|FATAL|ANR", log)),
+        # Ağ
+        "network_event_count":    len(re.findall(r"connect|socket|http|https", log, re.I)),
+        "dns_query_count":        len(re.findall(r"getaddrinfo|nslookup|resolv", log, re.I)),
+        # Kripto
+        "crypto_count":           len(re.findall(r"javax\.crypto|AES|RSA|Cipher", log)),
+        # Kod yükleme
+        "dex_loader_count":       len(re.findall(r"DexClassLoader|loadDex|BaseDex", log)),
+        "runtime_exec_count":     len(re.findall(r"Runtime\.exec|ProcessBuilder|/bin/sh", log)),
+        # Hassas erişimler
+        "sms_send_count":         len(re.findall(r"sendTextMessage|SmsManager", log)),
+        "sms_read_count":         len(re.findall(r"content://sms|content://mms", log)),
+        "contact_access_count":   len(re.findall(r"ContactsContract|getContacts|CONTACTS", log)),
+        "call_log_access_count":  len(re.findall(r"call_log|CallLog", log)),
+        # Dosya
+        "file_write_count":       len(re.findall(r"FileOutputStream|openFileOutput|FileWriter", log)),
+        # Reflection
+        "reflection_count":       len(re.findall(r"getDeclaredMethod|\.invoke\(|forName", log)),
+        # Native
+        "native_lib_count":       len(re.findall(r"System\.loadLibrary|dlopen", log)),
+        # Kamera / Mikrofon
+        "camera_access_count":    len(re.findall(r"android\.hardware\.Camera|CameraManager|openCamera", log)),
+        "mic_access_count":       len(re.findall(r"AudioRecord|MediaRecorder|startRecording", log)),
+        # Konum
+        "location_access_count":  len(re.findall(r"getLastKnownLocation|requestLocationUpdates|LocationManager", log)),
+        # Pano
+        "clipboard_access_count": len(re.findall(r"ClipboardManager|getPrimaryClip", log)),
+        # Cihaz yönetimi
+        "device_admin_count":     len(re.findall(r"DevicePolicyManager|isAdminActive|BIND_DEVICE_ADMIN", log)),
+        # WakeLock / persistence
+        "wakelock_count":         len(re.findall(r"acquireWakeLock|PARTIAL_WAKE_LOCK|WakeLock", log)),
+        # Hata / çökme
+        "exception_count":        len(re.findall(r"Exception|FATAL|ANR", log)),
     }
 
 
@@ -159,25 +179,74 @@ def parse_frida_log(frida_log_path: str) -> dict:
         events = []
 
     counts = {
-        "frida_reflection_forName":  0,
-        "frida_reflection_invoke":   0,
-        "frida_dex_load":            0,
-        "frida_dex_load_inmemory":   0,
-        "frida_crypto_cipher":       0,
-        "frida_crypto_digest":       0,
-        "frida_network_socket":      0,
-        "frida_network_http":        0,
-        "frida_runtime_exec":        0,
-        "frida_file_write":          0,
-        "frida_sms_send":            0,
+        # Reflection
+        "frida_reflection_forName":    0,
+        "frida_reflection_invoke":     0,
+        # DEX yükleme
+        "frida_dex_load":              0,
+        "frida_dex_load_inmemory":     0,
+        # Kripto
+        "frida_crypto_cipher":         0,
+        "frida_crypto_digest":         0,
+        "frida_base64_encode":         0,
+        # Ağ
+        "frida_network_socket":        0,
+        "frida_network_http":          0,
+        # Komut çalıştırma
+        "frida_runtime_exec":          0,
+        # Dosya
+        "frida_file_write":            0,
+        "frida_zip_open":              0,
+        # SMS / telefon
+        "frida_sms_send":              0,
+        "frida_sms_read":              0,
+        "frida_telephony_query":       0,
+        # Rehber / arama
+        "frida_contact_query":         0,
+        "frida_call_log_read":         0,
+        # Pano
+        "frida_clipboard_read":        0,
+        "frida_clipboard_write":       0,
+        # Kamera
+        "frida_camera_open":           0,
+        # Konum
+        "frida_location_request":      0,
+        # Ayarlar / persistence
+        "frida_shared_prefs_write":    0,
+        "frida_alarm_set":             0,
+        # Broadcast
+        "frida_broadcast_send":        0,
+        # Native
+        "frida_native_lib_load":       0,
+        # Veri ayrıştırma (C2 belirtisi)
+        "frida_json_parse":            0,
+        # Cihaz yönetimi
+        "frida_device_admin_check":    0,
+        # Paket listesi
+        "frida_package_enum":          0,
     }
+
+    # Benzersiz host sayacı (network çeşitlilik özelliği)
+    unique_hosts = set()
 
     for e in events:
         t = e.get("type", "")
         key = f"frida_{t}"
         if key in counts:
             counts[key] += 1
+        # Benzersiz host takibi
+        if t == "network_socket" and e.get("host"):
+            unique_hosts.add(e["host"])
+        elif t == "network_http" and e.get("url"):
+            try:
+                from urllib.parse import urlparse
+                host = urlparse(e["url"]).netloc
+                if host:
+                    unique_hosts.add(host)
+            except Exception:
+                pass
 
+    counts["frida_unique_hosts"] = len(unique_hosts)
     return counts
 
 
@@ -275,7 +344,7 @@ def main():
 
     _save(results, done_sha)
     print(f"\nBaşarılı: {len(results):,} | Başarısız: {failed:,}")
-    print(f"Kaydedildi → {DYNAMIC_PARQUET}")
+    print(f"Kaydedildi -> {DYNAMIC_PARQUET}")
 
 
 if __name__ == "__main__":

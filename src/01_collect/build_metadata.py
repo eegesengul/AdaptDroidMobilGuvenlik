@@ -1,4 +1,4 @@
-"""
+﻿"""
 İndirilen tüm APK'lardan metadata.csv oluşturur.
 Kullanım:
     python build_metadata.py
@@ -90,7 +90,7 @@ def main():
     METADATA_CSV.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(METADATA_CSV, index=False)
 
-    print(f"\nmetadata.csv oluşturuldu → {METADATA_CSV}")
+    print(f"\nmetadata.csv oluşturuldu -> {METADATA_CSV}")
     print(f"Toplam APK : {len(df):,}")
     print(f"  Malware  : {(df.label==1).sum():,}")
     print(f"  Benign   : {(df.label==0).sum():,}")

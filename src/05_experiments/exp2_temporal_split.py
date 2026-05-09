@@ -1,4 +1,4 @@
-"""
+﻿"""
 Deney 2 — Temporal Split
 Model 2019-2022 ile eğitilir, 2023/2024/2025/2026 ile test edilir.
 Amaç: Random split'in gerçek dünyayı nasıl yanılttığını göstermek.
@@ -76,7 +76,7 @@ def main():
 
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(all_results).to_csv(TABLES_DIR / "exp2_results.csv", index=False)
-    print(f"\nSonuçlar kaydedildi → {TABLES_DIR / 'exp2_results.csv'}")
+    print(f"\nSonuçlar kaydedildi -> {TABLES_DIR / 'exp2_results.csv'}")
 
 
 if __name__ == "__main__":

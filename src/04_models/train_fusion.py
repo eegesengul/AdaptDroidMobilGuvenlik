@@ -1,4 +1,4 @@
-"""
+﻿"""
 Adaptive Hybrid Fusion modeli eğitir ve kaydeder.
 Statik + dinamik skorları birleştirir, drift algılandığında
 otomatik olarak dinamik modele daha fazla ağırlık verir.
@@ -123,7 +123,7 @@ def main():
         "drift_threshold":   DRIFT_THRESHOLD,
     }
     joblib.dump(fusion_config, MODELS_DIR / "fusion_config.pkl")
-    print(f"\nFusion config kaydedildi → {MODELS_DIR / 'fusion_config.pkl'}")
+    print(f"\nFusion config kaydedildi -> {MODELS_DIR / 'fusion_config.pkl'}")
 
 
 if __name__ == "__main__":

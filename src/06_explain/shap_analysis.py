@@ -1,4 +1,4 @@
-"""
+﻿"""
 SHAP Explainability Analizi
 - Hangi feature'lar en önemli?
 - Yıllara göre feature önemi nasıl değişiyor? (drift yorumu)
@@ -56,7 +56,7 @@ def main():
     plt.tight_layout()
     fig.savefig(FIGURES_DIR / "shap_global.png", dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"Genel SHAP → {FIGURES_DIR / 'shap_global.png'}")
+    print(f"Genel SHAP -> {FIGURES_DIR / 'shap_global.png'}")
 
     # ── 2. Yıl bazlı SHAP (drift görselleştirmesi) ────────
     yearly_importance = {}
@@ -81,7 +81,7 @@ def main():
         plt.tight_layout()
         fig.savefig(FIGURES_DIR / f"shap_{year}.png", dpi=150, bbox_inches="tight")
         plt.close()
-        print(f"  [{year}] SHAP → {FIGURES_DIR / f'shap_{year}.png'}")
+        print(f"  [{year}] SHAP -> {FIGURES_DIR / f'shap_{year}.png'}")
 
     # ── 3. Yıllara göre top feature'ların önemi değişimi ──
     if len(yearly_importance) >= 2:
@@ -104,7 +104,7 @@ def main():
         plt.tight_layout()
         fig.savefig(FIGURES_DIR / "shap_drift_heatmap.png", dpi=150, bbox_inches="tight")
         plt.close()
-        print(f"Drift heatmap → {FIGURES_DIR / 'shap_drift_heatmap.png'}")
+        print(f"Drift heatmap -> {FIGURES_DIR / 'shap_drift_heatmap.png'}")
 
         # Tablo kaydet
         heat_data.to_csv(TABLES_DIR / "shap_yearly_importance.csv")
@@ -121,7 +121,7 @@ def main():
     plt.tight_layout()
     fig.savefig(FIGURES_DIR / "shap_beeswarm.png", dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"Beeswarm → {FIGURES_DIR / 'shap_beeswarm.png'}")
+    print(f"Beeswarm -> {FIGURES_DIR / 'shap_beeswarm.png'}")
 
     print("\nTüm SHAP analizleri tamamlandı.")
 

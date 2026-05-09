@@ -1,9 +1,10 @@
-# APK dosyaları (çok büyük, repo'ya girmiyor)
+# Data klasörü — büyük dosyalar, repo'ya girmiyor
 data/apks/
 data/dynamic_logs/
-
-# Feature parquet ve CSV'ler (büyük olabilir, opsiyonel)
-# data/features/     <- bu satırı yorum dışı bırakırsan feature'lar da girmez
+data/features/
+data/metadata.csv
+data/*.csv.gz
+data/*.gz
 
 # Modeller
 models/
