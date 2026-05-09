@@ -35,8 +35,10 @@ FRIDA_HOOKS_JS   = Path(__file__).parent / "frida_hooks.js"
 
 def adb(*args, timeout=30) -> str:
     try:
-        r = subprocess.run([ADB] + list(args), capture_output=True, text=True, timeout=timeout)
-        return r.stdout + r.stderr
+        r = subprocess.run([ADB] + list(args), capture_output=True,
+                           text=True, timeout=timeout,
+                           encoding="utf-8", errors="ignore")
+        return (r.stdout or "") + (r.stderr or "")
     except subprocess.TimeoutExpired:
         return ""
     except FileNotFoundError:
@@ -91,16 +93,49 @@ def force_stop(package: str):
 
 # ── Frida yardımcıları ─────────────────────────────────────
 
-def frida_attach(package: str, frida_log_path: str) -> "subprocess.Popen | None":
-    """Frida'yı APK'ya attach et, olayları frida_log dosyasına yaz."""
+def _get_pid(package: str, retries: int = 3, delay: float = 1.5) -> int | None:
+    """Cihaz tarafında grep yaparak PID döner (büyük ps çıktısı truncate olmaz)."""
+    for _ in range(retries):
+        # Grep device'da çalışır → sadece ilgili satır gelir
+        out = adb("shell", f"ps -A | grep {package}", timeout=15)
+        for line in out.splitlines():
+            if package in line:
+                parts = line.split()
+                # ps -A: USER PID PPID VSZ RSS WCHAN ADDR S NAME
+                if len(parts) >= 2:
+                    try:
+                        return int(parts[1])
+                    except ValueError:
+                        continue
+        time.sleep(delay)
+    return None
+
+def frida_attach(package: str, frida_log_path: str, pid: int | None = None):
+    """Frida'yı çalışan APK process'ine attach et, olayları frida_log dosyasına yazar.
+    Bağlantı: adb forward tcp:27042 tcp:27042 ile TCP üzerinden.
+    pid verilirse PID ile, yoksa paket adıyla attach dener.
+    """
     try:
         import frida
+        import threading, time as _time
 
         script_src = FRIDA_HOOKS_JS.read_text(encoding="utf-8")
         events = []
 
-        device  = frida.get_usb_device(timeout=5)
-        session = device.attach(package)
+        # TCP üzerinden bağlan — emülatör için get_usb_device değil
+        dm = frida.get_device_manager()
+        try:
+            device = dm.add_remote_device("localhost:27042")
+        except Exception:
+            devices = dm.enumerate_devices()
+            device = next((d for d in devices if "localhost" in str(d.id)), None)
+            if device is None:
+                raise RuntimeError("localhost:27042 cihazı bulunamadı")
+
+        if pid is None:
+            raise RuntimeError(f"PID alınamadı (app başlamadı veya çöktü): {package}")
+
+        session = device.attach(pid)
         script  = session.create_script(script_src)
 
         def on_message(msg, _data):
@@ -109,8 +144,6 @@ def frida_attach(package: str, frida_log_path: str) -> "subprocess.Popen | None"
 
         script.on("message", on_message)
         script.load()
-
-        import threading, time as _time
 
         def _writer():
             _time.sleep(ANALYSIS_WAIT + 5)
@@ -267,13 +300,18 @@ def analyze_apk(sha256: str, apk_path: str, use_frida: bool = True) -> dict | No
 
         adb("logcat", "-c")
         time.sleep(1)
-        launch_app(package)
 
         if use_frida:
-            frida_session = frida_attach(package, frida_log_path)
-
-        run_monkey(package)
-        time.sleep(ANALYSIS_WAIT)
+            # Monkey'i ÖNCE başlat (--ignore-crashes ile app'i ayakta tutar)
+            # Sonra PID görününce Frida attach ol
+            run_monkey(package)
+            pid = _get_pid(package)   # monkey çalışırken poll eder (retry var)
+            frida_session = frida_attach(package, frida_log_path, pid=pid)
+            time.sleep(ANALYSIS_WAIT)
+        else:
+            launch_app(package)
+            run_monkey(package)
+            time.sleep(ANALYSIS_WAIT)
         collect_logcat(log_path)
         force_stop(package)
 
@@ -309,6 +347,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--resume",   action="store_true")
     parser.add_argument("--no-frida", action="store_true", help="Frida olmadan çalıştır")
+    parser.add_argument("--limit",    type=int, default=None, help="Kaç APK analiz edilsin (test için)")
     args = parser.parse_args()
 
     DYNAMIC_LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -316,6 +355,8 @@ def main():
 
     meta = pd.read_csv(METADATA_CSV)
     dynamic_apks = meta[meta.in_dynamic == 1].reset_index(drop=True)
+    if args.limit:
+        dynamic_apks = dynamic_apks.head(args.limit)
     print(f"Dinamik analiz APK: {len(dynamic_apks):,} | Frida: {'KAPALI' if args.no_frida else 'AÇIK'}")
 
     done_sha = set()

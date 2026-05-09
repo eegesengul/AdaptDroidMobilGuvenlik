@@ -22,27 +22,28 @@ TABLES_DIR        = RESULTS_DIR / "tables"
 
 # ── APK hedef sayıları (yıl → [malware, benign]) ──────────
 APK_TARGETS = {
-    2019: [650, 650],
-    2020: [650, 650],
-    2021: [650, 650],
-    2022: [650, 650],
-    2023: [700, 700],
-    2024: [700, 700],
-    2025: [600, 600],
-    2026: [400, 400],
+    # [malware, benign]
+    # Train: 2016-2021, Val: 2022, Test: 2023
+    2016: [625, 625],
+    2017: [625, 625],
+    2018: [625, 625],
+    2019: [625, 625],
+    2020: [625, 625],
+    2021: [625, 625],
+    2022: [625, 625],
+    2023: [625, 625],
 }
 
 # ── Temporal split ─────────────────────────────────────────
 SPLITS = {
-    "train": [2019, 2020, 2021, 2022],
-    "val":   [2023],
-    "test1": [2024],
-    "test2": [2025],
-    "test3": [2026],
+    "train": [2016, 2017, 2018, 2019, 2020, 2021],
+    "val":   [2022],
+    "test":  [2023],
 }
 
 # ── Dinamik analiz alt kümesi (yıl → [malware, benign]) ───
 DYNAMIC_TARGETS = {
+    2016: [50, 0],   # sadece malware (henüz benign yok)
     2019: [50, 50],
     2020: [50, 50],
     2021: [50, 50],
@@ -53,9 +54,12 @@ DYNAMIC_TARGETS = {
     2026: [50, 50],
 }
 
-# ── API anahtarları (kendi keylerini gir) ──────────────────
-ANDROZOO_API_KEY  = "ANDROZOO_KEY_BURAYA"
-VT_API_KEY        = "VIRUSTOTAL_KEY_BURAYA"
+# ── API anahtarları (.env dosyasından okunur) ──────────────
+import os as _os
+from dotenv import load_dotenv as _load
+_load(ROOT / ".env")
+ANDROZOO_API_KEY  = _os.getenv("ANDROZOO_API_KEY", "ANDROZOO_KEY_BURAYA")
+VT_API_KEY        = _os.getenv("VT_API_KEY", "VIRUSTOTAL_KEY_BURAYA")
 
 # ── Model parametreleri ────────────────────────────────────
 LGBM_PARAMS = {
