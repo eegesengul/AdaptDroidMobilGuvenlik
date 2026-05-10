@@ -59,8 +59,17 @@ def get_package_name(apk_path: str) -> str | None:
 
 
 def install_apk(apk_path: str) -> bool:
+    """APK kur. Android 14+ eski targetSdk (<23) bloke edebilir;
+    --bypass-low-target-sdk-block ile aşılır."""
+    # Önce normal kur
     out = adb("install", "-r", "-t", apk_path, timeout=120)
-    return "Success" in out or "success" in out.lower()
+    if "Success" in out or "success" in out.lower():
+        return True
+    # Eski targetSdk bloğu varsa bypass ile tekrar dene
+    if "INSTALL_FAILED_DEPRECATED_SDK_VERSION" in out or "low target sdk" in out.lower():
+        out2 = adb("install", "-r", "-t", "--bypass-low-target-sdk-block", apk_path, timeout=120)
+        return "Success" in out2 or "success" in out2.lower()
+    return False
 
 
 def uninstall_apk(package: str):
@@ -379,10 +388,12 @@ def analyze_apk(sha256: str, apk_path: str, use_frida: bool = True) -> dict | No
 
 
 def _save(results: list, done_sha: set):
+    """Sonuçları parquet'e yaz. Mevcut dosya varsa her zaman merge et
+    (--resume olmadan çalışıldığında eski yılların üzerine yazılmasın)."""
     if not results:
         return
     df_new = pd.DataFrame(results)
-    if DYNAMIC_PARQUET.exists() and done_sha:
+    if DYNAMIC_PARQUET.exists():          # done_sha koşulu kaldırıldı — her zaman merge
         df_old = pd.read_parquet(DYNAMIC_PARQUET)
         df_new = pd.concat([df_old, df_new], ignore_index=True)
         df_new = df_new.drop_duplicates(subset="sha256")

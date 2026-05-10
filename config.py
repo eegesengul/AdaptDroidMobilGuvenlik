@@ -43,8 +43,10 @@ SPLITS = {
 
 # ── Dinamik analiz alt kümesi (yıl → [malware, benign]) ───
 DYNAMIC_TARGETS = {
-    2016: [50, 0],   # sadece malware (henüz benign yok)
-    2019: [50, 50],
+    2016: [50, 0],    # sadece malware (henüz benign yok)
+    2017: [50, 0],    # sadece malware
+    2018: [50, 0],    # sadece malware
+    2019: [60, 60],   # malware + benign (benign henüz yok, malware ~394)
     2020: [50, 50],
     2021: [50, 50],
     2022: [50, 50],
