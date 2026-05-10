@@ -1,0 +1,255 @@
+================================================================
+  AdaptDroid — Dinamik Analiz Kurulum Kilavuzu (Benign APK)
+================================================================
+
+Bu kilavuz, benign APK'lar uzerinde Frida tabanli dinamik analiz
+yapabilmek icin gerekli tum adimlari sirayla aciklar.
+
+
+----------------------------------------------------------------
+1. GEREKLI PROGRAMLAR
+----------------------------------------------------------------
+
+Asagidakileri indirip kur:
+
+  Python 3.11 veya 3.12
+    https://www.python.org/downloads/
+    Kurulum sirasinda "Add to PATH" kutusunu isaretle
+
+  Android Studio
+    https://developer.android.com/studio
+    Emulator icin gerekli
+
+  Git
+    https://git-scm.com/
+
+
+----------------------------------------------------------------
+2. REPOYU INDIR
+----------------------------------------------------------------
+
+Terminal (CMD veya PowerShell) ac, su komutu calistir:
+
+  git clone https://github.com/eegesengul/AdaptDroidMobilGuvenlik.git
+  cd AdaptDroidMobilGuvenlik
+
+
+----------------------------------------------------------------
+3. PYTHON ORTAMI KURULUMU
+----------------------------------------------------------------
+
+  python -m venv venv
+  venv\Scripts\activate
+  pip install -r requirements.txt
+
+NOT: Her terminal acisinda "venv\Scripts\activate" komutunu
+     calistirmani gerekiyor. (Solda "(venv)" gorunuyorsa aktif)
+
+
+----------------------------------------------------------------
+4. ANDROID STUDIO — EMULATOR OLUSTUR
+----------------------------------------------------------------
+
+  1. Android Studio'yu ac
+  2. Sag ustte "Device Manager"i ac
+  3. "Create Virtual Device" tikla
+  4. Listeden "Pixel 4" sec, Next
+  5. System Image ekraninda:
+       - API Level : 29   (Android 10)
+       - ABI       : x86_64
+       - "Google APIs" sec  <-- DIKKAT: "Google Play Store" OLMASIN
+  6. Finish
+  7. Olusturulan emulatori baslat (uc gen ikon)
+
+NEDEN Google Play Store olmamali?
+  Play Store imajlarinda root erisimi kisitlidir.
+  Frida bu kisitilamada calismaz.
+
+
+----------------------------------------------------------------
+5. ADB KURULUMU VE TEST
+----------------------------------------------------------------
+
+Android Studio ile birlikte ADB gelir. PATH'e eklemek icin:
+
+  Windows: Baslat menusune "Ortam degiskenleri" yaz, PATH'e su
+  klasoru ekle:
+    C:\Users\<kullanici_adin>\AppData\Local\Android\Sdk\platform-tools
+
+Emulator ACIKKEN terminalde su komutu calistir:
+
+  adb devices
+
+Beklenen cikti:
+  List of devices attached
+  emulator-5554   device
+
+"device" yaziyorsa hazir. "offline" yaziyorsa emulatorun tamamen
+acilmasini bekle.
+
+
+----------------------------------------------------------------
+6. FRIDA-SERVER KURULUMU
+----------------------------------------------------------------
+
+ONEMLI: Python frida paketi surum 17.9.7
+        frida-server da ayni surum olmali!
+
+Adim 1 — frida-server'i indir:
+
+  Tarayicide su sayfaya git:
+  https://github.com/frida/frida/releases/tag/17.9.7
+
+  Sayfada "Assets" bolumunden su dosyayi indir:
+    frida-server-17.9.7-android-x86_64.xz
+
+Adim 2 — .xz dosyasini ac:
+
+  7-Zip ile ac (https://www.7-zip.org/)
+  Sonuc: frida-server-17.9.7-android-x86_64 (uzantisiz dosya)
+
+Adim 3 — Emulatore yukle (emulator ACIK olmali):
+
+  adb push frida-server-17.9.7-android-x86_64 /data/local/tmp/frida-server
+  adb shell "chmod 755 /data/local/tmp/frida-server"
+
+Bu adim tek seferlik. Emulatore kalici olarak yuklenir.
+
+
+----------------------------------------------------------------
+7. HER OTURUMDA YAPILACAKLAR (EMULATOR ACILINCA)
+----------------------------------------------------------------
+
+Emulatori her actiginda su iki komutu calistir:
+
+  adb shell "/data/local/tmp/frida-server &"
+  adb forward tcp:27042 tcp:27042
+
+Kontrol:
+  adb shell "ps | grep frida"
+  --> frida-server satirini gormeni lazim
+
+UYARI: Bu iki komutu yapmadan pipeline calistirirsan
+       "unable to connect to remote frida-server" hatasi alirsin.
+
+
+----------------------------------------------------------------
+8. APK KLASOR YAPISI
+----------------------------------------------------------------
+
+Benign APK'larini yila gore ayir ve su yapida koy:
+
+  AdaptDroidMobilGuvenlik\
+  └── data\
+      └── apks\
+          └── benign\
+              ├── 2019\
+              │     ABC123DEF456...apk
+              │     GHI789JKL012...apk
+              ├── 2020\
+              │     ...
+              ├── 2021\
+              │     ...
+              ├── 2022\
+              │     ...
+              └── 2023\
+                    ...
+
+ONEMLI: APK dosya adlari SHA256 olmali (buyuk harf, 64 karakter)
+        Ornek: A1B2C3D4E5F6...apk
+
+Dosya adlari SHA256 degilse Ege'ye haber ver, duzeltme yapilir.
+
+
+----------------------------------------------------------------
+9. PIPELINE CALISTIRMA
+----------------------------------------------------------------
+
+Her yil icin asagidaki komutu calistir (65 basarili hedef):
+
+  python src\03_dynamic\run_dynamic_pipeline.py ^
+      --apk-dir data\apks\benign\2019 ^
+      --benign ^
+      --frida-only ^
+      --target 65 ^
+      --resume
+
+  python src\03_dynamic\run_dynamic_pipeline.py ^
+      --apk-dir data\apks\benign\2020 ^
+      --benign ^
+      --frida-only ^
+      --target 65 ^
+      --resume
+
+  ... 2021, 2022, 2023 icin ayni sekilde devam et
+
+PARAMETRELER:
+  --apk-dir   : APK'larin oldugu klasor
+  --benign    : Bunlarin benign (zararsiz) oldugunu belirtir
+  --frida-only: Frida tutunamamissa APK'yi aninda atla
+  --target 65 : 65 basarili analiz toplaninca dur
+  --resume    : Yarim kalan analizi kaldigi yerden devam ettir
+
+
+----------------------------------------------------------------
+10. BASARILI CIKTININ GORUNUMU
+----------------------------------------------------------------
+
+Pipeline dogru calistiginda boyle gorunur:
+
+  Dinamik analiz APK havuzu: 743 | Frida: SADECE FRIDA | Hedef: 65
+  Dinamik analiz: 100%|█████████| 112/743 [48:23<00:00]
+
+  Basarili: 65 | Frida tutunmadi (atlandi): 47
+  Hedef 65 --> HEDEFE ULASILDI
+
+
+----------------------------------------------------------------
+11. SONUCLARI PAYLAS
+----------------------------------------------------------------
+
+Her yil tamamlaninca su dosyayi Ege'ye gonder:
+
+  data\features\dynamic_features.parquet
+
+Bu tek dosyada tum yillarin sonuclari birikir.
+
+
+----------------------------------------------------------------
+12. SIK KARSILASILAN HATALAR
+----------------------------------------------------------------
+
+HATA: unable to connect to remote frida-server
+COZUM: adb forward tcp:27042 tcp:27042  komutunu calistir
+
+HATA: no devices/emulators found
+COZUM: Emulator acik degil, Android Studio'dan baslat
+
+HATA: INSTALL_FAILED_...
+COZUM: O APK bozuk veya emulatorla uyumsuz, pipeline otomatik atlar
+
+HATA: DeadSystemRuntimeException (hep ayni hata)
+COZUM: Emulatorun sistem servisi coktu
+       Emulatorü kapat, tekrar ac
+       Sonra frida-server ve adb forward komutlarini tekrar calistir
+
+HATA: venv\Scripts\activate calismıyor
+COZUM: PowerShell'de izin sorunu olabilir. Cozum:
+       Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+
+
+----------------------------------------------------------------
+OZET KONTROL LISTESI
+----------------------------------------------------------------
+
+  [ ] Python kuruldu ve PATH'te
+  [ ] Android Studio kuruldu
+  [ ] Emulator olusturuldu (API 29, x86_64, Google APIs)
+  [ ] pip install -r requirements.txt tamamlandi
+  [ ] frida-server 17.9.7 emulatore yuklendi
+  [ ] APK'lar yil klasorlerine yerlestirildi
+  [ ] Her oturumda: frida-server baslat + adb forward
+
+================================================================
+Sorular icin: Ege
+================================================================
