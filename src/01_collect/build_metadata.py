@@ -59,8 +59,56 @@ def collect_apks() -> list:
     return rows
 
 
+def get_abi(apk_path: str) -> str:
+    """APK'nın native lib ABI'sini döner: 'none', 'compat', 'armeabi_only'.
+    Klasör adı yerine ELF magic byte ile gerçek bitness kontrol edilir."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(apk_path) as z:
+            libs = [n for n in z.namelist()
+                    if n.startswith("lib/") and n.endswith(".so")]
+            if not libs:
+                return "none"   # saf Java veya runtime-packed — her emülatörde çalışır
+
+            has_64 = False
+            has_32_only = False
+            for lib in libs:
+                folder = lib.split("/")[1] if len(lib.split("/")) > 2 else ""
+                # Klasör adından beklenen bitness
+                if folder in ("x86_64", "arm64-v8a"):
+                    expected_64 = True
+                elif folder in ("x86", "armeabi", "armeabi-v7a"):
+                    expected_64 = False
+                else:
+                    continue
+
+                # Gerçek ELF class byte ile doğrula (ilk 8 byte yeterli)
+                try:
+                    data = z.read(lib, )[:8]  # sadece header
+                    if data[:4] == b'\x7fELF':
+                        actual_64 = (data[4] == 2)
+                    else:
+                        actual_64 = expected_64  # ELF değilse klasör adına güven
+                except Exception:
+                    actual_64 = expected_64
+
+                if actual_64:
+                    has_64 = True
+                else:
+                    has_32_only = True
+
+            if has_64:
+                return "compat"       # 64-bit lib var — API 34'te çalışır
+            if has_32_only:
+                return "armeabi_only" # sadece 32-bit — API 34'te crash
+            return "none"
+    except Exception:
+        return "unknown"
+
+
 def assign_dynamic_subset(df: pd.DataFrame) -> pd.DataFrame:
-    """Dinamik analiz için yıl/label dengeli alt küme seç."""
+    """Dinamik analiz için yıl/label dengeli alt küme seç.
+    ABI uyumlu APK'ları (none/compat) önceliklendirir."""
     import random
     random.seed(RANDOM_SEED)
     df = df.copy()
@@ -68,9 +116,26 @@ def assign_dynamic_subset(df: pd.DataFrame) -> pd.DataFrame:
 
     for year, (mal_n, ben_n) in DYNAMIC_TARGETS.items():
         for label, n in [(1, mal_n), (0, ben_n)]:
-            pool = df[(df.year == year) & (df.label == label)].index.tolist()
-            chosen = random.sample(pool, min(n, len(pool)))
+            pool_df = df[(df.year == year) & (df.label == label)]
+            if pool_df.empty or n == 0:
+                continue
+
+            # ABI kontrolü — uyumlu olanları önce al
+            pool_df = pool_df.copy()
+            pool_df["_abi"] = pool_df["apk_path"].apply(get_abi)
+            compat = pool_df[pool_df["_abi"].isin(["none", "compat"])].index.tolist()
+            other  = pool_df[pool_df["_abi"] == "armeabi_only"].index.tolist()
+
+            # Önce uyumlu havuzdan al, eksik kalırsa diğerlerinden tamamla
+            chosen = random.sample(compat, min(n, len(compat)))
+            if len(chosen) < n:
+                extra = random.sample(other, min(n - len(chosen), len(other)))
+                chosen += extra
+
             df.loc[chosen, "in_dynamic"] = 1
+            compat_count = sum(1 for c in chosen if c in set(compat))
+            print(f"  {year} label={label}: {len(chosen)} seçildi "
+                  f"({compat_count} uyumlu, {len(chosen)-compat_count} armeabi)")
 
     return df
 

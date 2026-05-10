@@ -1,0 +1,7 @@
+{
+  "name": "adaptdroid-frida",
+  "version": "1.0.0",
+  "dependencies": {
+    "frida-java-bridge": "^7.0.13"
+  }
+}

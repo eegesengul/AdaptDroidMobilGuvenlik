@@ -48,3 +48,9 @@ docxbuild/
 node_modules/
 *.lock
 package-lock.json
+
+# Frida araçları ve derlenmiş bundle (source kontrolunda değil)
+frida-server
+frida-server.xz
+frida_project/node_modules/
+frida_project/package-lock.json

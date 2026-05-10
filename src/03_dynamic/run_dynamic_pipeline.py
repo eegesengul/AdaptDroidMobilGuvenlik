@@ -110,30 +110,34 @@ def _get_pid(package: str, retries: int = 3, delay: float = 1.5) -> int | None:
         time.sleep(delay)
     return None
 
-def frida_attach(package: str, frida_log_path: str, pid: int | None = None):
-    """Frida'yı çalışan APK process'ine attach et, olayları frida_log dosyasına yazar.
-    Bağlantı: adb forward tcp:27042 tcp:27042 ile TCP üzerinden.
-    pid verilirse PID ile, yoksa paket adıyla attach dener.
+def _get_frida_device():
+    """TCP üzerinden Frida device döner (emülatör için)."""
+    import frida
+    dm = frida.get_device_manager()
+    try:
+        return dm.add_remote_device("localhost:27042")
+    except Exception:
+        devices = dm.enumerate_devices()
+        device = next((d for d in devices if "localhost" in str(d.id)), None)
+        if device is None:
+            raise RuntimeError("localhost:27042 cihazı bulunamadı")
+        return device
+
+
+def frida_spawn(package: str):
+    """App'i Frida ile spawn eder (suspend), hook'ları yükler, resume eder.
+    İlk instruction'dan itibaren tüm Java çağrılarını yakalar.
+    Döner: (session, events) — events listesi on_message ile doldurulur.
     """
     try:
         import frida
-        import threading, time as _time
-
         script_src = FRIDA_HOOKS_JS.read_text(encoding="utf-8")
         events = []
 
-        # TCP üzerinden bağlan — emülatör için get_usb_device değil
-        dm = frida.get_device_manager()
-        try:
-            device = dm.add_remote_device("localhost:27042")
-        except Exception:
-            devices = dm.enumerate_devices()
-            device = next((d for d in devices if "localhost" in str(d.id)), None)
-            if device is None:
-                raise RuntimeError("localhost:27042 cihazı bulunamadı")
+        device = _get_frida_device()
 
-        if pid is None:
-            raise RuntimeError(f"PID alınamadı (app başlamadı veya çöktü): {package}")
+        # App'i suspend halde başlat
+        pid = device.spawn([package])
 
         session = device.attach(pid)
         script  = session.create_script(script_src)
@@ -145,17 +149,43 @@ def frida_attach(package: str, frida_log_path: str, pid: int | None = None):
         script.on("message", on_message)
         script.load()
 
-        def _writer():
-            _time.sleep(ANALYSIS_WAIT + 5)
-            with open(frida_log_path, "w") as f:
-                json.dump(events, f)
-
-        threading.Thread(target=_writer, daemon=True).start()
-        return session
+        # Hook'lar yüklendi, şimdi resume et
+        device.resume(pid)
+        return session, events, pid
 
     except Exception as e:
-        print(f"  [Frida] attach başarısız: {e} — sadece logcat kullanılacak")
-        return None
+        print(f"  [Frida-spawn] başarısız: {e} — logcat moduna geçiliyor")
+        return None, [], None
+
+
+def frida_attach(package: str, pid: int | None = None):
+    """Çalışan process'e attach et (spawn başarısız olursa fallback).
+    Döner: (session, events)
+    """
+    try:
+        import frida
+        script_src = FRIDA_HOOKS_JS.read_text(encoding="utf-8")
+        events = []
+
+        device = _get_frida_device()
+
+        if pid is None:
+            raise RuntimeError(f"PID alınamadı: {package}")
+
+        session = device.attach(pid)
+        script  = session.create_script(script_src)
+
+        def on_message(msg, _data):
+            if msg.get("type") == "send":
+                events.append(msg["payload"])
+
+        script.on("message", on_message)
+        script.load()
+        return session, events
+
+    except Exception as e:
+        print(f"  [Frida-attach] başarısız: {e} — sadece logcat kullanılacak")
+        return None, []
 
 
 # ── Feature extraction ─────────────────────────────────────
@@ -301,22 +331,38 @@ def analyze_apk(sha256: str, apk_path: str, use_frida: bool = True) -> dict | No
         adb("logcat", "-c")
         time.sleep(1)
 
+        frida_events = []
+        spawn_pid = None
         if use_frida:
-            # Monkey'i ÖNCE başlat (--ignore-crashes ile app'i ayakta tutar)
-            # Sonra PID görününce Frida attach ol
-            run_monkey(package)
-            pid = _get_pid(package)   # monkey çalışırken poll eder (retry var)
-            frida_session = frida_attach(package, frida_log_path, pid=pid)
+            # SPAWN modu: app suspend başlar, hook yüklenir, sonra resume
+            # İlk instruction'dan itibaren tüm Java çağrıları yakalanır
+            frida_session, frida_events, spawn_pid = frida_spawn(package)
+
+            if frida_session is None:
+                # Spawn başarısız → app'i elle başlat + monkey + geç attach
+                launch_app(package)
+                run_monkey(package)
+                pid = _get_pid(package)
+                frida_session, frida_events = frida_attach(package, pid=pid)
+            else:
+                # Spawn başarılı → monkey'i de başlat (ek etkileşim)
+                run_monkey(package)
+
             time.sleep(ANALYSIS_WAIT)
         else:
             launch_app(package)
             run_monkey(package)
             time.sleep(ANALYSIS_WAIT)
+
         collect_logcat(log_path)
         force_stop(package)
 
+        # Frida olaylarını yaz (detach'ten ÖNCE — tüm pending send()'ler flush olsun)
         if frida_session:
             try:
+                time.sleep(1)  # Son mesajların gelmesi için kısa bekleme
+                with open(frida_log_path, "w") as f:
+                    json.dump(frida_events, f)
                 frida_session.detach()
             except Exception:
                 pass
@@ -348,6 +394,7 @@ def main():
     parser.add_argument("--resume",   action="store_true")
     parser.add_argument("--no-frida", action="store_true", help="Frida olmadan çalıştır")
     parser.add_argument("--limit",    type=int, default=None, help="Kaç APK analiz edilsin (test için)")
+    parser.add_argument("--year",     type=int, default=None, help="Sadece belirli yılı analiz et (test için)")
     args = parser.parse_args()
 
     DYNAMIC_LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -355,6 +402,8 @@ def main():
 
     meta = pd.read_csv(METADATA_CSV)
     dynamic_apks = meta[meta.in_dynamic == 1].reset_index(drop=True)
+    if args.year:
+        dynamic_apks = dynamic_apks[dynamic_apks.year == args.year].reset_index(drop=True)
     if args.limit:
         dynamic_apks = dynamic_apks.head(args.limit)
     print(f"Dinamik analiz APK: {len(dynamic_apks):,} | Frida: {'KAPALI' if args.no_frida else 'AÇIK'}")
