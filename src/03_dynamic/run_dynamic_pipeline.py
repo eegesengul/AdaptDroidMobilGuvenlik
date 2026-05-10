@@ -424,19 +424,39 @@ def main():
                         help="Kaç başarılı analiz istendiği; hedefe ulaşınca dur")
     parser.add_argument("--limit",       type=int, default=None, help="Kaç APK denilsin (test için)")
     parser.add_argument("--year",        type=int, default=None, help="Sadece belirli yılı analiz et")
+    parser.add_argument("--benign",      action="store_true",   help="Benign APKları analiz et (label=0)")
+    parser.add_argument("--apk-dir",     type=str, default=None,
+                        help="Metadata yerine doğrudan APK klasörü (orn: data/apks/benign/2020)")
     args = parser.parse_args()
 
     DYNAMIC_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     FEATURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    meta = pd.read_csv(METADATA_CSV)
-
-    if args.year:
-        # Yıl belirtilmişse o yılın MALWARE APK'larını havuz olarak kullan
-        # (in_dynamic filtresi uygulanmaz — hedef sayısına ulaşmak için büyük havuz lazım)
-        dynamic_apks = meta[(meta.year == args.year) & (meta.label == 1)].reset_index(drop=True)
+    # APK klasörü doğrudan verilmişse metadata'ya gerek yok
+    if args.apk_dir:
+        apk_dir = Path(args.apk_dir)
+        apk_files = list(apk_dir.glob("*.apk"))
+        if not apk_files:
+            print(f"HATA: {apk_dir} içinde APK bulunamadı.")
+            return
+        label = 0 if args.benign else 1
+        # SHA256 dosya adından al
+        dynamic_apks = pd.DataFrame([
+            {"sha256": f.stem.upper(), "apk_path": str(f), "label": label, "year": args.year}
+            for f in apk_files
+        ])
+        print(f"APK klasörü: {apk_dir} → {len(dynamic_apks):,} APK (label={label})")
     else:
-        dynamic_apks = meta[meta.in_dynamic == 1].reset_index(drop=True)
+        meta = pd.read_csv(METADATA_CSV)
+        label_filter = 0 if args.benign else 1
+
+        if args.year:
+            # Yıl belirtilmişse o yılın APK'larını havuz olarak kullan
+            dynamic_apks = meta[(meta.year == args.year) & (meta.label == label_filter)].reset_index(drop=True)
+        else:
+            dynamic_apks = meta[meta.in_dynamic == 1].reset_index(drop=True)
+            if args.benign:
+                dynamic_apks = dynamic_apks[dynamic_apks.label == 0].reset_index(drop=True)
 
     if args.limit:
         dynamic_apks = dynamic_apks.head(args.limit)
