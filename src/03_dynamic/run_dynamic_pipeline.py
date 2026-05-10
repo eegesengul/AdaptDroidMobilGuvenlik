@@ -324,7 +324,11 @@ def parse_frida_log(frida_log_path: str) -> dict:
 
 # ── Ana pipeline ───────────────────────────────────────────
 
-def analyze_apk(sha256: str, apk_path: str, use_frida: bool = True) -> dict | None:
+def analyze_apk(sha256: str, apk_path: str, use_frida: bool = True,
+                frida_only: bool = False) -> dict | None:
+    """APK analiz eder.
+    frida_only=True → Frida hook kurulamazsa None döner (APK atlanır).
+    """
     log_path        = str(DYNAMIC_LOGS_DIR / f"{sha256}.log")
     frida_log_path  = str(DYNAMIC_LOGS_DIR / f"{sha256}_frida.json")
 
@@ -348,11 +352,17 @@ def analyze_apk(sha256: str, apk_path: str, use_frida: bool = True) -> dict | No
             frida_session, frida_events, spawn_pid = frida_spawn(package)
 
             if frida_session is None:
+                if frida_only:
+                    # Spawn başarısız + sadece Frida modu → attach denemeden hemen çık
+                    return None  # finally → uninstall
                 # Spawn başarısız → app'i elle başlat + monkey + geç attach
                 launch_app(package)
                 run_monkey(package)
                 pid = _get_pid(package)
                 frida_session, frida_events = frida_attach(package, pid=pid)
+                if frida_only and frida_session is None:
+                    # Attach da başarısız → erken çık
+                    return None  # finally → uninstall
             else:
                 # Spawn başarılı → monkey'i de başlat (ek etkileşim)
                 run_monkey(package)
@@ -384,6 +394,11 @@ def analyze_apk(sha256: str, apk_path: str, use_frida: bool = True) -> dict | No
     feats.update(parse_frida_log(frida_log_path))
     feats["sha256"]     = sha256
     feats["frida_used"] = int(use_frida and os.path.exists(frida_log_path))
+
+    # frida_only modunda: Frida tutunamamışsa bu APK'yı geç
+    if frida_only and feats["frida_used"] == 0:
+        return None
+
     return feats
 
 
@@ -402,49 +417,75 @@ def _save(results: list, done_sha: set):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--resume",   action="store_true")
-    parser.add_argument("--no-frida", action="store_true", help="Frida olmadan çalıştır")
-    parser.add_argument("--limit",    type=int, default=None, help="Kaç APK analiz edilsin (test için)")
-    parser.add_argument("--year",     type=int, default=None, help="Sadece belirli yılı analiz et (test için)")
+    parser.add_argument("--resume",      action="store_true")
+    parser.add_argument("--no-frida",    action="store_true",  help="Frida olmadan çalıştır")
+    parser.add_argument("--frida-only",  action="store_true",  help="Frida tutunamamışsa APK'yı geç")
+    parser.add_argument("--target",      type=int, default=None,
+                        help="Kaç başarılı analiz istendiği; hedefe ulaşınca dur")
+    parser.add_argument("--limit",       type=int, default=None, help="Kaç APK denilsin (test için)")
+    parser.add_argument("--year",        type=int, default=None, help="Sadece belirli yılı analiz et")
     args = parser.parse_args()
 
     DYNAMIC_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     FEATURES_DIR.mkdir(parents=True, exist_ok=True)
 
     meta = pd.read_csv(METADATA_CSV)
-    dynamic_apks = meta[meta.in_dynamic == 1].reset_index(drop=True)
+
     if args.year:
-        dynamic_apks = dynamic_apks[dynamic_apks.year == args.year].reset_index(drop=True)
+        # Yıl belirtilmişse o yılın MALWARE APK'larını havuz olarak kullan
+        # (in_dynamic filtresi uygulanmaz — hedef sayısına ulaşmak için büyük havuz lazım)
+        dynamic_apks = meta[(meta.year == args.year) & (meta.label == 1)].reset_index(drop=True)
+    else:
+        dynamic_apks = meta[meta.in_dynamic == 1].reset_index(drop=True)
+
     if args.limit:
         dynamic_apks = dynamic_apks.head(args.limit)
-    print(f"Dinamik analiz APK: {len(dynamic_apks):,} | Frida: {'KAPALI' if args.no_frida else 'AÇIK'}")
+
+    frida_tag = "KAPALI" if args.no_frida else ("SADECE FRİDA" if args.frida_only else "AÇIK")
+    target_tag = f" | Hedef: {args.target}" if args.target else ""
+    print(f"Dinamik analiz APK havuzu: {len(dynamic_apks):,} | Frida: {frida_tag}{target_tag}")
 
     done_sha = set()
     if args.resume and DYNAMIC_PARQUET.exists():
         done = pd.read_parquet(DYNAMIC_PARQUET, columns=["sha256"])
-        done_sha = set(done["sha256"].tolist())
-        dynamic_apks = dynamic_apks[~dynamic_apks.sha256.isin(done_sha)]
-        print(f"Kalan: {len(dynamic_apks):,}")
+        done_sha = set(s.upper() for s in done["sha256"].tolist())
+        dynamic_apks = dynamic_apks[~dynamic_apks.sha256.str.upper().isin(done_sha)]
+        print(f"Kalan havuz: {len(dynamic_apks):,}")
 
     devices = adb("devices")
     if "emulator" not in devices and len(devices.strip().split("\n")) < 2:
         print("UYARI: Emülatör bulunamadı. Android Studio'dan başlat.")
         return
 
-    results, failed = [], 0
+    results, failed, skipped_frida = [], 0, 0
 
     for _, row in tqdm(dynamic_apks.iterrows(), total=len(dynamic_apks), desc="Dinamik analiz"):
-        res = analyze_apk(row["sha256"], row["apk_path"], use_frida=not args.no_frida)
+        # Hedefe ulaşıldıysa dur
+        if args.target and len(results) >= args.target:
+            break
+
+        res = analyze_apk(
+            row["sha256"], row["apk_path"],
+            use_frida=not args.no_frida,
+            frida_only=args.frida_only,
+        )
         if res:
             results.append(res)
+        elif args.frida_only:
+            skipped_frida += 1  # Frida tutunmadı, atlandı
         else:
             failed += 1
 
-        if len(results) % 50 == 0 and results:
+        if len(results) % 20 == 0 and results:
             _save(results, done_sha)
 
     _save(results, done_sha)
-    print(f"\nBaşarılı: {len(results):,} | Başarısız: {failed:,}")
+
+    frida_line = f" | Frida tutunmadı (atlandı): {skipped_frida:,}" if args.frida_only else ""
+    print(f"\nBaşarılı: {len(results):,} | Başarısız: {failed:,}{frida_line}")
+    if args.target:
+        status = "✓ HEDEFE ULAŞILDI" if len(results) >= args.target else "✗ Havuz tükendi"
+        print(f"Hedef {args.target} → {status}")
     print(f"Kaydedildi -> {DYNAMIC_PARQUET}")
 
 
