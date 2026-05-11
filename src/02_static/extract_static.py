@@ -283,9 +283,18 @@ def main():
     else:
         print(f"Toplam APK: {len(meta):,}")
 
+    # Çıktı yolu: --year verilmişse yıl klasörüne, yoksa tek dosyaya
+    from pathlib import Path
+    if args.year:
+        out_dir = FEATURES_DIR / "static_features" / str(args.year)
+        out_path = out_dir / "static_features.parquet"
+    else:
+        out_dir = FEATURES_DIR
+        out_path = STATIC_PARQUET
+
     done_sha = set()
-    if args.resume and STATIC_PARQUET.exists():
-        done = pd.read_parquet(STATIC_PARQUET, columns=["sha256"])
+    if args.resume and out_path.exists():
+        done = pd.read_parquet(out_path, columns=["sha256"])
         done_sha = set(done["sha256"].tolist())
         meta = meta[~meta.sha256.isin(done_sha)]
         print(f"Zaten tamamlanan: {len(done_sha):,} | Kalan: {len(meta):,}")
@@ -296,7 +305,8 @@ def main():
 
     with ProcessPoolExecutor(max_workers=args.workers) as exe:
         futures = {exe.submit(process_row, row): row for row in rows_list}
-        bar = tqdm(as_completed(futures), total=len(futures), desc="Statik extraction")
+        bar = tqdm(as_completed(futures), total=len(futures), desc="Statik extraction",
+                   dynamic_ncols=True)
         for fut in bar:
             row = futures[fut]
             apk_name = os.path.basename(row.get("apk_path", "?"))
@@ -316,13 +326,13 @@ def main():
 
     df_new = pd.DataFrame(results)
 
-    if args.resume and STATIC_PARQUET.exists():
-        df_old = pd.read_parquet(STATIC_PARQUET)
+    if args.resume and out_path.exists():
+        df_old = pd.read_parquet(out_path)
         df_new = pd.concat([df_old, df_new], ignore_index=True)
 
-    FEATURES_DIR.mkdir(parents=True, exist_ok=True)
-    df_new.to_parquet(STATIC_PARQUET, index=False)
-    print(f"\nKaydedildi -> {STATIC_PARQUET}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    df_new.to_parquet(out_path, index=False)
+    print(f"\nKaydedildi -> {out_path}")
     print(f"Toplam satır: {len(df_new):,} | Kolon: {len(df_new.columns):,}")
     print(f"\nÖzellik grupları:")
     for prefix in ["perm_", "api_", "ref_", "dex_", "anti_", "obf_", "manifest_", "file_", "net_"]:
