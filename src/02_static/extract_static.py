@@ -274,23 +274,54 @@ def main():
                         help="Daha önce yapılanları atla")
     parser.add_argument("--year",    type=int, default=None,
                         help="Sadece belirli yılı işle (orn: --year 2016)")
+    parser.add_argument("--apk-dir", type=str, default=None,
+                        help="APK klasörü (metadata.csv yerine direkt klasörden oku)")
+    parser.add_argument("--label",   type=int, default=0,
+                        help="--apk-dir ile kullanılır: 0=benign, 1=malware (varsayılan: 0)")
+    parser.add_argument("--out",     type=str, default=None,
+                        help="Çıktı parquet yolu (varsayılan: otomatik)")
     args = parser.parse_args()
 
-    meta = pd.read_csv(METADATA_CSV)
-    if args.year:
-        meta = meta[meta.year == args.year].reset_index(drop=True)
-        print(f"Yıl filtresi: {args.year} → {len(meta):,} APK")
-    else:
-        print(f"Toplam APK: {len(meta):,}")
-
-    # Çıktı yolu: --year verilmişse yıl klasörüne, yoksa tek dosyaya
     from pathlib import Path
-    if args.year:
-        out_dir = FEATURES_DIR / "static_features" / str(args.year)
+
+    # ── APK kaynağı: klasör mü, metadata mü? ──────────────
+    if args.apk_dir:
+        apk_dir = Path(args.apk_dir)
+        apk_files = sorted(apk_dir.glob("*.apk"))
+        if not apk_files:
+            print(f"HATA: {apk_dir} içinde .apk bulunamadı!")
+            return
+        year = args.year or 0
+        meta = pd.DataFrame([
+            {"sha256": f.stem, "apk_path": str(f), "label": args.label, "year": year}
+            for f in apk_files
+        ])
+        print(f"Klasör modu: {apk_dir} → {len(meta):,} APK  (label={args.label})")
+    else:
+        meta = pd.read_csv(METADATA_CSV)
+        if args.year:
+            meta = meta[meta.year == args.year].reset_index(drop=True)
+            print(f"Yıl filtresi: {args.year} → {len(meta):,} APK")
+        else:
+            print(f"Toplam APK: {len(meta):,}")
+
+    # ── Çıktı yolu ─────────────────────────────────────────
+    if args.out:
+        out_path = Path(args.out)
+        out_dir  = out_path.parent
+    elif args.apk_dir:
+        tag      = Path(args.apk_dir).name          # klasör adı (orn: 2023)
+        lbl      = "benign" if args.label == 0 else "malware"
+        out_dir  = FEATURES_DIR / "static_features" / lbl / tag
+        out_path = out_dir / "static_features.parquet"
+    elif args.year:
+        out_dir  = FEATURES_DIR / "static_features" / str(args.year)
         out_path = out_dir / "static_features.parquet"
     else:
-        out_dir = FEATURES_DIR
+        out_dir  = FEATURES_DIR
         out_path = STATIC_PARQUET
+
+    print(f"Çıktı: {out_path}")
 
     done_sha = set()
     if args.resume and out_path.exists():
