@@ -272,10 +272,16 @@ def main():
                         help="Paralel işçi sayısı (RAM'e göre ayarla)")
     parser.add_argument("--resume",  action="store_true",
                         help="Daha önce yapılanları atla")
+    parser.add_argument("--year",    type=int, default=None,
+                        help="Sadece belirli yılı işle (orn: --year 2016)")
     args = parser.parse_args()
 
     meta = pd.read_csv(METADATA_CSV)
-    print(f"Toplam APK: {len(meta):,}")
+    if args.year:
+        meta = meta[meta.year == args.year].reset_index(drop=True)
+        print(f"Yıl filtresi: {args.year} → {len(meta):,} APK")
+    else:
+        print(f"Toplam APK: {len(meta):,}")
 
     done_sha = set()
     if args.resume and STATIC_PARQUET.exists():
