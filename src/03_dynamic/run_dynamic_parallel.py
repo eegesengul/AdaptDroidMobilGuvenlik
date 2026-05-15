@@ -255,6 +255,7 @@ def setup_emulator_for_analysis(serial):
     # Ekranı portrait'e kilitle (Monkey rotation event göndermesin)
     adb(serial, "shell", "settings put system accelerometer_rotation 0", timeout=5)
     adb(serial, "shell", "settings put system user_rotation 0", timeout=5)
+    # wm user-rotation sadece yeni Android build'lerinde var, hata verirse sorun değil
     adb(serial, "shell", "wm user-rotation lock 0", timeout=5)
 
 
