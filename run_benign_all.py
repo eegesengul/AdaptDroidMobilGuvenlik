@@ -16,7 +16,7 @@ from datetime import datetime
 
 DEFAULT_YEARS   = [2016, 2017, 2018, 2019, 2020, 2021]
 NUM_EMULATORS   = 2                          # kac emulator kullanilacak
-AVD_NAMES       = [f"Pixel_3_{i+1}" for i in range(NUM_EMULATORS)]
+AVD_NAMES       = ["Pixel_4", "Pixel_4_2"]
 SNAPSHOT        = "clean"
 ANALYSIS_WAIT   = 300
 MAX_RETRIES     = 9999

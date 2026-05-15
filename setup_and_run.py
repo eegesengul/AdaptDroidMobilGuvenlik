@@ -26,7 +26,7 @@ from pathlib import Path
 # ── Sabitler ──────────────────────────────────────────────
 
 NUM_EMULATORS   = 2
-AVD_NAMES       = [f"Pixel_3_{i+1}" for i in range(NUM_EMULATORS)]
+AVD_NAMES       = ["Pixel_4", "Pixel_4_2"]
 
 FRIDA_VERSION   = "17.9.7"
 FRIDA_ARCH      = "android-x86_64"
