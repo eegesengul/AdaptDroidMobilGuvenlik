@@ -309,8 +309,18 @@ def main():
         metavar="YIL",
         help=f"Analiz edilecek yillar (varsayilan: {DEFAULT_YEARS})"
     )
+    parser.add_argument(
+        "--avds", nargs="+", default=None,
+        metavar="AVD",
+        help="Kullanilacak AVD isimleri (varsayilan: AVD_NAMES sabiti)"
+    )
     args = parser.parse_args()
     years = args.years
+
+    if args.avds:
+        global AVD_NAMES, NUM_EMULATORS
+        AVD_NAMES     = args.avds
+        NUM_EMULATORS = len(AVD_NAMES)
 
     log.info(f"Benign analiz basliyor - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     log.info(f"  Yillar: {years} | AVD'ler: {AVD_NAMES} | Analiz: {ANALYSIS_WAIT}s")

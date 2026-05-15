@@ -322,10 +322,14 @@ def setup_emulators(emu: Path, frida_binary: Path) -> list[str]:
 
 # ── Adim 6: Pipeline baslat ───────────────────────────────
 
-def run_pipeline(years: list[int]):
+def run_pipeline(years: list[int], avds: list[str] | None = None):
     years_str = " ".join(str(y) for y in years)
-    log.info(f"Pipeline baslatiliyor: run_benign_all.py --years {years_str}")
-    subprocess.run([sys.executable, "run_benign_all.py", "--years"] + [str(y) for y in years])
+    cmd = [sys.executable, "run_benign_all.py", "--years"] + [str(y) for y in years]
+    if avds:
+        cmd += ["--avds"] + avds
+    log.info(f"Pipeline baslatiliyor: run_benign_all.py --years {years_str}" +
+             (f" --avds {' '.join(avds)}" if avds else ""))
+    subprocess.run(cmd)
 
 
 # ── Ana akis ──────────────────────────────────────────────
@@ -339,7 +343,17 @@ def main():
         metavar="YIL",
         help="Analiz edilecek yillar (varsayilan: 2016 2017 2018 2019 2020 2021)"
     )
+    parser.add_argument(
+        "--avds", nargs="+", default=None,
+        metavar="AVD",
+        help="Kullanilacak AVD isimleri (varsayilan: kod icindeki AVD_NAMES)"
+    )
     args = parser.parse_args()
+
+    if args.avds:
+        global AVD_NAMES, NUM_EMULATORS
+        AVD_NAMES     = args.avds
+        NUM_EMULATORS = len(AVD_NAMES)
 
     log.info("=" * 60)
     log.info(f"  AdaptDroid Benign Analiz — {NUM_EMULATORS} Emülatör Kurulum & Baslatma")
@@ -358,7 +372,7 @@ def main():
     log.info(f"Kurulum tamamlandi. Aktif emulatorler: {serials}")
     log.info("Pipeline basliyor...")
     log.info("")
-    run_pipeline(args.years)
+    run_pipeline(args.years, args.avds)
 
 
 if __name__ == "__main__":
