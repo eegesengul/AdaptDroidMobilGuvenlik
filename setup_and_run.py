@@ -78,6 +78,15 @@ def sdk_tool(name: str) -> Path | None:
         SDK_ROOT / "tools" / "bin" / name,
         SDK_ROOT / "tools" / "bin" / (name + ".bat"),
     ]
+    # Versiyonlu cmdline-tools klasorleri: cmdline-tools/13.0/bin/ gibi
+    ct = SDK_ROOT / "cmdline-tools"
+    if ct.exists():
+        for sub in sorted(ct.iterdir(), reverse=True):   # en yeni versiyon once
+            if sub.is_dir() and sub.name != "latest":
+                candidates += [
+                    sub / "bin" / name,
+                    sub / "bin" / (name + ".bat"),
+                ]
     for p in candidates:
         if p.exists():
             return p
