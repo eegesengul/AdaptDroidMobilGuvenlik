@@ -58,8 +58,11 @@ DYNAMIC_TARGETS = {
 
 # ── API anahtarları (.env dosyasından okunur) ──────────────
 import os as _os
-from dotenv import load_dotenv as _load
-_load(ROOT / ".env")
+try:
+    from dotenv import load_dotenv as _load
+    _load(ROOT / ".env")
+except ImportError:
+    pass  # python-dotenv kurulu degilse .env atlanir
 ANDROZOO_API_KEY  = _os.getenv("ANDROZOO_API_KEY", "ANDROZOO_KEY_BURAYA")
 VT_API_KEY        = _os.getenv("VT_API_KEY", "VIRUSTOTAL_KEY_BURAYA")
 
