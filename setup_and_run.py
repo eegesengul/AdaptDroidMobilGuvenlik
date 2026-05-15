@@ -99,7 +99,7 @@ def run(cmd, **kw):
     kw.setdefault("text", True)
     kw.setdefault("timeout", 120)
     r = subprocess.run(cmd, **kw)
-    return (r.stdout + r.stderr).strip(), r.returncode
+    return ((r.stdout or "") + (r.stderr or "")).strip(), r.returncode
 
 
 def adb(*args, timeout=30) -> str:
@@ -165,13 +165,21 @@ def ensure_system_image():
     if sdkmanager is None:
         log.warning("sdkmanager bulunamadi — system image kontrolu atlaniyor.")
         return
-    out, _ = run([str(sdkmanager), "--list_installed"])
+    # Java surumu < 17 olan makinelerde SKIP_JDK_VERSION_CHECK gerekli
+    env = os.environ.copy()
+    env["SKIP_JDK_VERSION_CHECK"] = "true"
+    out, rc = run([str(sdkmanager), "--list_installed"], env=env)
+    if rc != 0:
+        log.warning(f"sdkmanager --list_installed basarisiz (rc={rc}) — system image kontrolu atlaniyor.")
+        return
     if SYSTEM_IMAGE in out:
         log.info(f"System image zaten kurulu: {SYSTEM_IMAGE}")
         return
     log.info(f"System image indiriliyor: {SYSTEM_IMAGE}  (birkac dakika surabilir...)")
-    run([str(sdkmanager), "--install", SYSTEM_IMAGE],
-        capture_output=False, timeout=600)
+    _, rc2 = run([str(sdkmanager), "--install", SYSTEM_IMAGE],
+                 capture_output=False, timeout=600, env=env)
+    if rc2 != 0:
+        log.error(f"System image indirilemedi (rc={rc2}). Devam ediliyor...")
 
 
 # ── Adim 3: AVD'ler ────────────────────────────────────────
@@ -180,7 +188,9 @@ def ensure_avd(avd_name: str, avdmanager: Path | None):
     if avdmanager is None:
         log.warning(f"avdmanager bulunamadi — {avd_name} AVD kontrolu atlaniyor.")
         return
-    out, _ = run([str(avdmanager), "list", "avd"])
+    env = os.environ.copy()
+    env["SKIP_JDK_VERSION_CHECK"] = "true"
+    out, _ = run([str(avdmanager), "list", "avd"], env=env)
     if avd_name in out:
         log.info(f"AVD zaten mevcut: {avd_name}")
         return
@@ -191,7 +201,7 @@ def ensure_avd(avd_name: str, avdmanager: Path | None):
          "-k", SYSTEM_IMAGE,
          "-d", "pixel_3",
          "--force"],
-        capture_output=False, timeout=120,
+        capture_output=False, timeout=120, env=env,
     )
     if rc != 0:
         log.error(f"AVD olusturulamadi: {avd_name}")
