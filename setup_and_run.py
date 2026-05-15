@@ -204,8 +204,11 @@ def ensure_avd(avd_name: str, avdmanager: Path | None):
         capture_output=False, timeout=120, env=env,
     )
     if rc != 0:
-        log.error(f"AVD olusturulamadi: {avd_name}")
-        sys.exit(1)
+        log.error(
+            f"AVD olusturulamadi: {avd_name}  "
+            f"(Java 11+ gerekli — 'winget install Microsoft.OpenJDK.11' ile kur)"
+        )
+        return   # crash yerine devam et; emulator zaten varsa calisir
     log.info(f"AVD olusturuldu: {avd_name}")
 
 
