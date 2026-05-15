@@ -2,9 +2,10 @@
 Tum benign yillarini N emülatörle paralel analiz eder.
 Emulator offline, frida ölü, parquet bozuk, pipeline takili gibi
 durumlarda otomatik kurtarir.
-Calistir: python run_benign_all.py
+Calistir: python run_benign_all.py [--years 2016 2017 2018]
 """
 
+import argparse
 import io
 import subprocess
 import sys
@@ -13,7 +14,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
-YEARS           = [2016, 2017, 2018, 2019, 2020, 2021]
+DEFAULT_YEARS   = [2016, 2017, 2018, 2019, 2020, 2021]
 NUM_EMULATORS   = 2                          # kac emulator kullanilacak
 AVD_NAMES       = [f"Pixel_3_{i+1}" for i in range(NUM_EMULATORS)]
 SNAPSHOT        = "clean"
@@ -293,10 +294,19 @@ def run_year(year: int):
 
 
 def main():
-    log.info(f"Benign analiz basliyor - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    log.info(f"  Yillar: {YEARS} | AVD'ler: {AVD_NAMES} | Analiz: {ANALYSIS_WAIT}s")
+    parser = argparse.ArgumentParser(description="Benign APK paralel dinamik analiz")
+    parser.add_argument(
+        "--years", nargs="+", type=int, default=DEFAULT_YEARS,
+        metavar="YIL",
+        help=f"Analiz edilecek yillar (varsayilan: {DEFAULT_YEARS})"
+    )
+    args = parser.parse_args()
+    years = args.years
 
-    for year in YEARS:
+    log.info(f"Benign analiz basliyor - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    log.info(f"  Yillar: {years} | AVD'ler: {AVD_NAMES} | Analiz: {ANALYSIS_WAIT}s")
+
+    for year in years:
         run_year(year)
 
     log.info("Tum yillar tamamlandi.")

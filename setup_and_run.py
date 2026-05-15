@@ -292,16 +292,28 @@ def setup_emulators(emu: Path, frida_binary: Path) -> list[str]:
 
 # ── Adim 6: Pipeline baslat ───────────────────────────────
 
-def run_pipeline():
-    log.info("Pipeline baslatiliyor: run_benign_all.py")
-    subprocess.run([sys.executable, "run_benign_all.py"])
+def run_pipeline(years: list[int]):
+    years_str = " ".join(str(y) for y in years)
+    log.info(f"Pipeline baslatiliyor: run_benign_all.py --years {years_str}")
+    subprocess.run([sys.executable, "run_benign_all.py", "--years"] + [str(y) for y in years])
 
 
 # ── Ana akis ──────────────────────────────────────────────
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="AdaptDroid tam kurulum ve analiz")
+    parser.add_argument(
+        "--years", nargs="+", type=int,
+        default=[2016, 2017, 2018, 2019, 2020, 2021],
+        metavar="YIL",
+        help="Analiz edilecek yillar (varsayilan: 2016 2017 2018 2019 2020 2021)"
+    )
+    args = parser.parse_args()
+
     log.info("=" * 60)
     log.info(f"  AdaptDroid Benign Analiz — {NUM_EMULATORS} Emülatör Kurulum & Baslatma")
+    log.info(f"  Yillar: {args.years}")
     log.info("=" * 60)
 
     emu          = check_sdk()
@@ -316,7 +328,7 @@ def main():
     log.info(f"Kurulum tamamlandi. Aktif emulatorler: {serials}")
     log.info("Pipeline basliyor...")
     log.info("")
-    run_pipeline()
+    run_pipeline(args.years)
 
 
 if __name__ == "__main__":
