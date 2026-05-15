@@ -34,8 +34,8 @@ from tqdm import tqdm
 
 from config import DYNAMIC_LOGS_DIR, FEATURES_DIR
 
-MONKEY_EVENTS   = 500
-MONKEY_THROTTLE = 200
+MONKEY_EVENTS   = 1000
+MONKEY_THROTTLE = 150
 KEEPER_INTERVAL = 4   # saniyede bir foreground kontrolü
 ANALYSIS_WAIT   = 60
 FRIDA_HOOKS_JS  = Path(__file__).parent / "frida_hooks.js"
