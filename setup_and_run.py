@@ -1,0 +1,325 @@
+"""
+Tek komutla tam kurulum ve analiz baslatma.
+Kullanim: python setup_and_run.py
+
+Yaptiklarimiz:
+  1. Android SDK / emulator.exe bul
+  2. API-28 system image indir (yoksa)
+  3. Pixel_3 AVD olustur (yoksa)
+  4. frida-server indir + emülatöre push et (yoksa)
+  5. Clean snapshot kaydet (yoksa)
+  6. run_benign_all.py'yi baslat
+"""
+
+import io
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+import lzma
+import logging
+from pathlib import Path
+
+# ── Sabitler ──────────────────────────────────────────────
+
+FRIDA_VERSION   = "17.9.7"
+FRIDA_ARCH      = "android-x86_64"
+FRIDA_URL       = (
+    f"https://github.com/frida/frida/releases/download/{FRIDA_VERSION}/"
+    f"frida-server-{FRIDA_VERSION}-{FRIDA_ARCH}.xz"
+)
+FRIDA_LOCAL     = Path("tools/frida-server")          # indirilen binary
+FRIDA_DEVICE    = "/data/local/tmp/frida-server"
+
+AVD_NAME        = "Pixel_3"
+API_LEVEL       = "28"
+SYSTEM_IMAGE    = f"system-images;android-{API_LEVEL};google_apis;x86_64"
+SNAPSHOT        = "clean"
+
+SDK_ROOT = (
+    Path(os.environ.get("ANDROID_SDK_ROOT", ""))
+    or Path(os.environ.get("ANDROID_HOME", ""))
+    or Path.home() / "AppData/Local/Android/Sdk"      # Windows default
+    or Path.home() / "Android/Sdk"                    # Linux/Mac default
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[logging.StreamHandler(
+        io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    )],
+)
+log = logging.getLogger()
+
+
+# ── Yardimci fonksiyonlar ──────────────────────────────────
+
+def sdk_tool(name: str) -> Path | None:
+    """SDK arac yolunu dondur, bulamazsa None."""
+    candidates = [
+        SDK_ROOT / "emulator" / name,
+        SDK_ROOT / "emulator" / (name + ".exe"),
+        SDK_ROOT / "cmdline-tools" / "latest" / "bin" / name,
+        SDK_ROOT / "cmdline-tools" / "latest" / "bin" / (name + ".bat"),
+        SDK_ROOT / "tools" / "bin" / name,
+        SDK_ROOT / "tools" / "bin" / (name + ".bat"),
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    # PATH'te ara
+    found = shutil.which(name) or shutil.which(name + ".exe") or shutil.which(name + ".bat")
+    return Path(found) if found else None
+
+
+def run(cmd, **kw):
+    """Komutu calistir, stdout/stderr'i dondur."""
+    kw.setdefault("capture_output", True)
+    kw.setdefault("text", True)
+    kw.setdefault("timeout", 120)
+    r = subprocess.run(cmd, **kw)
+    return (r.stdout + r.stderr).strip(), r.returncode
+
+
+def adb(*args, timeout=30) -> str:
+    out, _ = run(["adb"] + list(args), timeout=timeout)
+    return out
+
+
+def online_serial() -> str | None:
+    out = adb("devices")
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == "device" and parts[0].startswith("emulator-"):
+            return parts[0]
+    return None
+
+
+def wait_boot(timeout=300) -> str | None:
+    log.info("  Emulator boot bekleniyor...")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        serial = online_serial()
+        if serial:
+            for _ in range(30):
+                if adb("-s", serial, "shell", "getprop", "sys.boot_completed").strip() == "1":
+                    log.info(f"  Boot tamamlandi: {serial}")
+                    return serial
+                time.sleep(5)
+        time.sleep(5)
+    return None
+
+
+# ── Adim 1: SDK kontrol ────────────────────────────────────
+
+def check_sdk() -> Path:
+    emu = sdk_tool("emulator")
+    if emu is None:
+        log.error(
+            "Android emulator bulunamadi!\n"
+            "Lutfen Android Studio kur veya ANDROID_SDK_ROOT ortam degiskenini ayarla.\n"
+            f"Aranan: {SDK_ROOT}"
+        )
+        sys.exit(1)
+    log.info(f"SDK bulundu: {SDK_ROOT}")
+    return emu
+
+
+# ── Adim 2: System image ───────────────────────────────────
+
+def ensure_system_image():
+    sdkmanager = sdk_tool("sdkmanager")
+    if sdkmanager is None:
+        log.warning("sdkmanager bulunamadi — system image kontrolu atlaniyor.")
+        return
+
+    out, _ = run([str(sdkmanager), "--list_installed"])
+    if SYSTEM_IMAGE in out:
+        log.info(f"System image zaten kurulu: {SYSTEM_IMAGE}")
+        return
+
+    log.info(f"System image indiriliyor: {SYSTEM_IMAGE}  (birkac dakika surabilir...)")
+    _, rc = run(
+        [str(sdkmanager), "--install", SYSTEM_IMAGE],
+        capture_output=False,
+        timeout=600,
+    )
+    if rc != 0:
+        log.error("System image indirilemedi. AVD olusturulamayabilir.")
+
+
+# ── Adim 3: AVD ───────────────────────────────────────────
+
+def ensure_avd():
+    avdmanager = sdk_tool("avdmanager")
+    if avdmanager is None:
+        log.warning("avdmanager bulunamadi — AVD kontrolu atlaniyor.")
+        return
+
+    out, _ = run([str(avdmanager), "list", "avd"])
+    if AVD_NAME in out:
+        log.info(f"AVD zaten mevcut: {AVD_NAME}")
+        return
+
+    log.info(f"AVD olusturuluyor: {AVD_NAME} (API {API_LEVEL})")
+    _, rc = run(
+        [str(avdmanager), "create", "avd",
+         "-n", AVD_NAME,
+         "-k", SYSTEM_IMAGE,
+         "-d", "pixel_3",
+         "--force"],
+        capture_output=False,
+        timeout=120,
+    )
+    if rc != 0:
+        log.error("AVD olusturulamadi!")
+        sys.exit(1)
+    log.info(f"AVD olusturuldu: {AVD_NAME}")
+
+
+# ── Adim 4: frida-server ──────────────────────────────────
+
+def ensure_frida_binary() -> Path:
+    """frida-server binary'sini tools/ klasorune indir."""
+    FRIDA_LOCAL.parent.mkdir(parents=True, exist_ok=True)
+
+    if FRIDA_LOCAL.exists() and FRIDA_LOCAL.stat().st_size > 1_000_000:
+        log.info(f"frida-server binary mevcut: {FRIDA_LOCAL}")
+        return FRIDA_LOCAL
+
+    xz_path = FRIDA_LOCAL.with_suffix(".xz")
+    log.info(f"frida-server indiriliyor: {FRIDA_URL}")
+
+    def _progress(count, block, total):
+        pct = min(100, int(count * block * 100 / total))
+        print(f"\r  {pct}%", end="", flush=True)
+
+    urllib.request.urlretrieve(FRIDA_URL, xz_path, reporthook=_progress)
+    print()
+
+    log.info("Arsiv aciliyor...")
+    with lzma.open(xz_path, "rb") as f_in, open(FRIDA_LOCAL, "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
+    xz_path.unlink(missing_ok=True)
+    log.info(f"frida-server hazir: {FRIDA_LOCAL} ({FRIDA_LOCAL.stat().st_size//1024} KB)")
+    return FRIDA_LOCAL
+
+
+def push_frida(serial: str, binary: Path):
+    """frida-server'i emülatöre push et ve calistir."""
+    log.info(f"  [{serial}] frida-server push ediliyor...")
+    adb("-s", serial, "push", str(binary), FRIDA_DEVICE, timeout=60)
+    adb("-s", serial, "shell", f"su 0 chmod 755 {FRIDA_DEVICE}", timeout=10)
+    adb("-s", serial, "shell", f"su 0 nohup {FRIDA_DEVICE} &>/dev/null &", timeout=5)
+    time.sleep(4)
+    out = adb("-s", serial, "shell", "ps 2>/dev/null | grep frida-server", timeout=5)
+    if "frida-server" in out:
+        log.info(f"  [{serial}] frida-server calisiyor.")
+    else:
+        log.warning(f"  [{serial}] frida-server baslatılamadi!")
+
+
+def frida_already_on_device(serial: str) -> bool:
+    """Emülatörde dogru versiyonda frida-server var mi?"""
+    size = adb("-s", serial, "shell", f"stat -c%s {FRIDA_DEVICE} 2>/dev/null").strip()
+    return size.isdigit() and int(size) > 1_000_000
+
+
+# ── Adim 5: Emülatör baslat + snapshot ───────────────────
+
+def start_and_configure(emu: Path, frida_binary: Path) -> str:
+    """Emülatörü cold-boot ile baslat, frida push et, clean snapshot kaydet."""
+
+    # Varsa online emülatörü kullan
+    serial = online_serial()
+    if serial:
+        log.info(f"Emulator zaten online: {serial}")
+    else:
+        log.info(f"Emulator baslatiliyor (cold boot): {AVD_NAME}")
+        subprocess.Popen(
+            [str(emu), "-avd", AVD_NAME, "-no-audio", "-no-window", "-no-snapshot-load"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        serial = wait_boot(timeout=360)
+        if serial is None:
+            log.error("Emulator baslatilamadi!")
+            sys.exit(1)
+
+    # Snapshot var mi kontrol et
+    snap_out = adb("-s", serial, "emu", "avd", "snapshot", "list")
+    if SNAPSHOT in snap_out:
+        log.info(f"Clean snapshot zaten mevcut: '{SNAPSHOT}'")
+        # Snapshot yukle (frida dahil)
+        log.info("Snapshot yukleniyor...")
+        adb("-s", serial, "emu", "avd", "snapshot", "load", SNAPSHOT, timeout=60)
+        time.sleep(8)
+        # frida calisiyor mu?
+        out = adb("-s", serial, "shell", "ps 2>/dev/null | grep frida-server", timeout=5)
+        if "frida-server" not in out:
+            push_frida(serial, frida_binary)
+        else:
+            log.info(f"  [{serial}] frida-server snapshot'tan yuklu, calisiyor.")
+        return serial
+
+    # Snapshot yok — ilk kurulum
+    log.info("Clean snapshot bulunamadi — ilk kurulum yapiliyor...")
+    _configure_emulator(serial)
+    push_frida(serial, frida_binary)
+
+    log.info(f"  [{serial}] Clean snapshot kaydediliyor: '{SNAPSHOT}'")
+    adb("-s", serial, "emu", "avd", "snapshot", "save", SNAPSHOT, timeout=120)
+    log.info("  Snapshot kaydedildi.")
+    return serial
+
+
+def _configure_emulator(serial: str):
+    cmds = [
+        "settings put global stay_on_while_plugged_in 3",
+        "settings put system screen_off_timeout 2147483647",
+        "settings put secure lockscreen.disabled 1",
+        "settings put global window_animation_scale 0",
+        "settings put global transition_animation_scale 0",
+        "settings put global animator_duration_scale 0",
+        "settings put system accelerometer_rotation 0",
+        "settings put system user_rotation 0",
+        "wm user-rotation lock 0",
+        "wm dismiss-keyguard",
+    ]
+    for cmd in cmds:
+        adb("-s", serial, "shell", cmd, timeout=6)
+    log.info(f"  [{serial}] Emulator ayarlari uygulandı.")
+
+
+# ── Adim 6: Pipeline baslat ───────────────────────────────
+
+def run_pipeline():
+    log.info("Pipeline baslatiliyor: run_benign_all.py")
+    subprocess.run([sys.executable, "run_benign_all.py"])
+
+
+# ── Ana akis ──────────────────────────────────────────────
+
+def main():
+    log.info("=" * 55)
+    log.info("  AdaptDroid Benign Analiz — Otomatik Kurulum & Baslatma")
+    log.info("=" * 55)
+
+    emu          = check_sdk()
+    ensure_system_image()
+    ensure_avd()
+    frida_binary = ensure_frida_binary()
+    start_and_configure(emu, frida_binary)
+
+    log.info("")
+    log.info("Kurulum tamamlandi. Pipeline basliyor...")
+    log.info("")
+    run_pipeline()
+
+
+if __name__ == "__main__":
+    main()
