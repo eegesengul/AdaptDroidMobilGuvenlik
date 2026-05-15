@@ -41,12 +41,20 @@ API_LEVEL       = "28"
 SYSTEM_IMAGE    = f"system-images;android-{API_LEVEL};google_apis;x86_64"
 SNAPSHOT        = "clean"
 
-SDK_ROOT = (
-    Path(os.environ.get("ANDROID_SDK_ROOT", ""))
-    or Path(os.environ.get("ANDROID_HOME", ""))
-    or Path.home() / "AppData/Local/Android/Sdk"
-    or Path.home() / "Android/Sdk"
-)
+def _find_sdk_root() -> Path:
+    for var in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
+        v = os.environ.get(var, "")
+        if v:
+            return Path(v)
+    for candidate in (
+        Path.home() / "AppData/Local/Android/Sdk",
+        Path.home() / "Android/Sdk",
+    ):
+        if candidate.exists():
+            return candidate
+    return Path.home() / "AppData/Local/Android/Sdk"
+
+SDK_ROOT = _find_sdk_root()
 
 logging.basicConfig(
     level=logging.INFO,
