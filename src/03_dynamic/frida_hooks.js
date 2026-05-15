@@ -13494,86 +13494,112 @@ Script.bindWeak(runtime, () => {
 });
 var frida_java_bridge_default = runtime;
 
+
 // hooks.ts
 send({ type: "script_started" });
 frida_java_bridge_default.perform(() => {
   send({ type: "java_perform_ok" });
-  const Class = frida_java_bridge_default.use("java.lang.Class");
-  Class.forName.overload("java.lang.String").implementation = function(name) {
-    send({ type: "reflection_forName", class: name });
-    return this.forName(name);
-  };
-  const DexClassLoader = frida_java_bridge_default.use("dalvik.system.DexClassLoader");
-  DexClassLoader.$init.overload("java.lang.String", "java.lang.String", "java.lang.String", "java.lang.ClassLoader").implementation = function(dexPath, optimizedDir, libraryPath, parent) {
-    send({ type: "dex_load", dex_path: dexPath });
-    return this.$init(dexPath, optimizedDir, libraryPath, parent);
-  };
+
+  try {
+    const Class = frida_java_bridge_default.use("java.lang.Class");
+    Class.forName.overload("java.lang.String").implementation = function(name) {
+      send({ type: "reflection_forName", class: name });
+      return this.forName(name);
+    };
+  } catch (_e) {}
+
+  try {
+    const DexClassLoader = frida_java_bridge_default.use("dalvik.system.DexClassLoader");
+    DexClassLoader.$init.overload("java.lang.String", "java.lang.String", "java.lang.String", "java.lang.ClassLoader").implementation = function(dexPath, optimizedDir, libraryPath, parent) {
+      send({ type: "dex_load", dex_path: dexPath });
+      return this.$init(dexPath, optimizedDir, libraryPath, parent);
+    };
+  } catch (_e) {}
+
   try {
     const InMemoryDexClassLoader = frida_java_bridge_default.use("dalvik.system.InMemoryDexClassLoader");
     InMemoryDexClassLoader.$init.overload("java.nio.ByteBuffer", "java.lang.ClassLoader").implementation = function(buf, parent) {
       send({ type: "dex_load_inmemory" });
       return this.$init(buf, parent);
     };
-  } catch (_e) {
-  }
-  const Cipher = frida_java_bridge_default.use("javax.crypto.Cipher");
-  Cipher.getInstance.overload("java.lang.String").implementation = function(algo) {
-    send({ type: "crypto_cipher", algorithm: algo });
-    return this.getInstance(algo);
-  };
-  const MessageDigest = frida_java_bridge_default.use("java.security.MessageDigest");
-  MessageDigest.getInstance.overload("java.lang.String").implementation = function(algo) {
-    send({ type: "crypto_digest", algorithm: algo });
-    return this.getInstance(algo);
-  };
+  } catch (_e) {}
+
+  try {
+    const Cipher = frida_java_bridge_default.use("javax.crypto.Cipher");
+    Cipher.getInstance.overload("java.lang.String").implementation = function(algo) {
+      send({ type: "crypto_cipher", algorithm: algo });
+      return this.getInstance(algo);
+    };
+  } catch (_e) {}
+
+  try {
+    const MessageDigest = frida_java_bridge_default.use("java.security.MessageDigest");
+    MessageDigest.getInstance.overload("java.lang.String").implementation = function(algo) {
+      send({ type: "crypto_digest", algorithm: algo });
+      return this.getInstance(algo);
+    };
+  } catch (_e) {}
+
   try {
     const Base64 = frida_java_bridge_default.use("android.util.Base64");
     Base64.encodeToString.overload("[B", "int").implementation = function(input, flags) {
       send({ type: "base64_encode" });
       return this.encodeToString(input, flags);
     };
-  } catch (_e) {
-  }
-  const Socket = frida_java_bridge_default.use("java.net.Socket");
-  Socket.$init.overload("java.lang.String", "int").implementation = function(host, port) {
-    send({ type: "network_socket", host, port });
-    return this.$init(host, port);
-  };
-  const URL = frida_java_bridge_default.use("java.net.URL");
-  URL.openConnection.overload().implementation = function() {
-    send({ type: "network_http", url: this.toString() });
-    return this.openConnection();
-  };
-  const Runtime2 = frida_java_bridge_default.use("java.lang.Runtime");
-  Runtime2.exec.overload("java.lang.String").implementation = function(cmd) {
-    send({ type: "runtime_exec", command: cmd });
-    return this.exec(cmd);
-  };
-  Runtime2.exec.overload("[Ljava.lang.String;").implementation = function(cmds) {
-    send({ type: "runtime_exec", command: cmds.join(" ") });
-    return this.exec(cmds);
-  };
-  const FileOutputStream = frida_java_bridge_default.use("java.io.FileOutputStream");
-  FileOutputStream.$init.overload("java.lang.String").implementation = function(path) {
-    send({ type: "file_write", path });
-    return this.$init(path);
-  };
+  } catch (_e) {}
+
+  try {
+    const Socket = frida_java_bridge_default.use("java.net.Socket");
+    Socket.$init.overload("java.lang.String", "int").implementation = function(host, port) {
+      send({ type: "network_socket", host: host, port: port });
+      return this.$init(host, port);
+    };
+  } catch (_e) {}
+
+  try {
+    const URL = frida_java_bridge_default.use("java.net.URL");
+    URL.openConnection.overload().implementation = function() {
+      send({ type: "network_http", url: this.toString() });
+      return this.openConnection();
+    };
+  } catch (_e) {}
+
+  try {
+    const Runtime2 = frida_java_bridge_default.use("java.lang.Runtime");
+    Runtime2.exec.overload("java.lang.String").implementation = function(cmd) {
+      send({ type: "runtime_exec", command: cmd });
+      return this.exec(cmd);
+    };
+    Runtime2.exec.overload("[Ljava.lang.String;").implementation = function(cmds) {
+      send({ type: "runtime_exec", command: cmds.join(" ") });
+      return this.exec(cmds);
+    };
+  } catch (_e) {}
+
+  try {
+    const FileOutputStream = frida_java_bridge_default.use("java.io.FileOutputStream");
+    FileOutputStream.$init.overload("java.lang.String").implementation = function(path) {
+      send({ type: "file_write", path: path });
+      return this.$init(path);
+    };
+  } catch (_e) {}
+
   try {
     const ZipFile = frida_java_bridge_default.use("java.util.zip.ZipFile");
     ZipFile.$init.overload("java.lang.String").implementation = function(path) {
-      send({ type: "zip_open", path });
+      send({ type: "zip_open", path: path });
       return this.$init(path);
     };
-  } catch (_e) {
-  }
+  } catch (_e) {}
+
   try {
     const SmsManager = frida_java_bridge_default.use("android.telephony.SmsManager");
     SmsManager.sendTextMessage.implementation = function(dest, sc, text, sent, delivery) {
       send({ type: "sms_send", destination: dest });
       return this.sendTextMessage(dest, sc, text, sent, delivery);
     };
-  } catch (_e) {
-  }
+  } catch (_e) {}
+
   try {
     const TelephonyManager = frida_java_bridge_default.use("android.telephony.TelephonyManager");
     try {
@@ -13581,24 +13607,21 @@ frida_java_bridge_default.perform(() => {
         send({ type: "telephony_query", field: "deviceId" });
         return this.getDeviceId();
       };
-    } catch (_e) {
-    }
+    } catch (_e) {}
     try {
       TelephonyManager.getImei.overload().implementation = function() {
         send({ type: "telephony_query", field: "imei" });
         return this.getImei();
       };
-    } catch (_e) {
-    }
+    } catch (_e) {}
     try {
       TelephonyManager.getSubscriberId.overload().implementation = function() {
         send({ type: "telephony_query", field: "subscriberId" });
         return this.getSubscriberId();
       };
-    } catch (_e) {
-    }
-  } catch (_e) {
-  }
+    } catch (_e) {}
+  } catch (_e) {}
+
   try {
     const ClipboardManager = frida_java_bridge_default.use("android.content.ClipboardManager");
     ClipboardManager.getPrimaryClip.implementation = function() {
@@ -13609,8 +13632,8 @@ frida_java_bridge_default.perform(() => {
       send({ type: "clipboard_write" });
       return this.setPrimaryClip(clip);
     };
-  } catch (_e) {
-  }
+  } catch (_e) {}
+
   try {
     const ContentResolver = frida_java_bridge_default.use("android.content.ContentResolver");
     ContentResolver.query.overload("android.net.Uri", "[Ljava.lang.String;", "java.lang.String", "[Ljava.lang.String;", "java.lang.String").implementation = function(uri, projection, selection, selectionArgs, sortOrder) {
@@ -13624,16 +13647,16 @@ frida_java_bridge_default.perform(() => {
       }
       return this.query(uri, projection, selection, selectionArgs, sortOrder);
     };
-  } catch (_e) {
-  }
+  } catch (_e) {}
+
   try {
     const SharedPreferencesEditor = frida_java_bridge_default.use("android.app.SharedPreferencesImpl$EditorImpl");
     SharedPreferencesEditor.commit.implementation = function() {
       send({ type: "shared_prefs_write" });
       return this.commit();
     };
-  } catch (_e) {
-  }
+  } catch (_e) {}
+
   try {
     const Context = frida_java_bridge_default.use("android.app.ContextImpl");
     Context.sendBroadcast.overload("android.content.Intent").implementation = function(intent) {
@@ -13641,16 +13664,16 @@ frida_java_bridge_default.perform(() => {
       send({ type: "broadcast_send", action });
       return this.sendBroadcast(intent);
     };
-  } catch (_e) {
-  }
+  } catch (_e) {}
+
   try {
     const AlarmManager = frida_java_bridge_default.use("android.app.AlarmManager");
     AlarmManager.set.overload("int", "long", "android.app.PendingIntent").implementation = function(type, triggerAtMillis, operation) {
       send({ type: "alarm_set" });
       return this.set(type, triggerAtMillis, operation);
     };
-  } catch (_e) {
-  }
+  } catch (_e) {}
+
   try {
     const System = frida_java_bridge_default.use("java.lang.System");
     System.loadLibrary.implementation = function(libname) {
@@ -13661,30 +13684,29 @@ frida_java_bridge_default.perform(() => {
       send({ type: "native_lib_load", lib: filename });
       return this.load(filename);
     };
-  } catch (_e) {
-  }
+  } catch (_e) {}
+
   try {
     const JSONObject = frida_java_bridge_default.use("org.json.JSONObject");
     JSONObject.$init.overload("java.lang.String").implementation = function(src) {
       send({ type: "json_parse" });
       return this.$init(src);
     };
-  } catch (_e) {
-  }
+  } catch (_e) {}
+
   try {
     const DevicePolicyManager = frida_java_bridge_default.use("android.app.admin.DevicePolicyManager");
     DevicePolicyManager.isAdminActive.implementation = function(who) {
       send({ type: "device_admin_check" });
       return this.isAdminActive(who);
     };
-  } catch (_e) {
-  }
+  } catch (_e) {}
+
   try {
     const PackageManager = frida_java_bridge_default.use("android.app.ApplicationPackageManager");
     PackageManager.getInstalledPackages.overload("int").implementation = function(flags) {
       send({ type: "package_enum" });
       return this.getInstalledPackages(flags);
     };
-  } catch (_e) {
-  }
+  } catch (_e) {}
 });

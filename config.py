@@ -8,7 +8,7 @@ DATA_DIR          = ROOT / "data"
 APK_DIR           = DATA_DIR / "apks"
 MALWARE_DIR       = APK_DIR / "malware"
 BENIGN_DIR        = APK_DIR / "benign"
-FEATURES_DIR      = DATA_DIR / "features"
+FEATURES_DIR      = DATA_DIR / "features_old"
 DYNAMIC_LOGS_DIR  = DATA_DIR / "dynamic_logs"
 METADATA_CSV      = DATA_DIR / "metadata.csv"
 STATIC_PARQUET    = FEATURES_DIR / "static_features.parquet"
@@ -24,14 +24,14 @@ TABLES_DIR        = RESULTS_DIR / "tables"
 APK_TARGETS = {
     # [malware, benign]
     # Train: 2016-2021, Val: 2022, Test: 2023
-    2016: [625, 625],
-    2017: [625, 625],
-    2018: [625, 625],
-    2019: [625, 625],
-    2020: [625, 625],
-    2021: [625, 625],
-    2022: [625, 625],
-    2023: [625, 625],
+    2016: [625, 650],
+    2017: [625, 650],
+    2018: [625, 650],
+    2019: [625, 650],
+    2020: [625, 650],
+    2021: [625, 650],
+    2022: [625, 650],
+    2023: [625, 650],
 }
 
 # ── Temporal split ─────────────────────────────────────────

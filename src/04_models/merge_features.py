@@ -1,6 +1,6 @@
 ﻿"""
 Statik ve dinamik feature'ları metadata ile birleştirir.
-Çıktı: data/features/merged_features.parquet
+Çıktı: data/features_old/merged_features.parquet
 
 Kullanım:
     python merge_features.py
@@ -32,13 +32,13 @@ def main():
     meta = meta[["sha256", "year", "label", "split", "in_dynamic"]].copy()
     print(f"  Toplam APK: {len(meta):,}")
 
-    # ── Statik features ───────────────────────────────────
+    # ── Statik features_old ───────────────────────────────────
     if not STATIC_PARQUET.exists():
         print("HATA: static_features.parquet bulunamadı.")
         print("Önce: python src/02_static/extract_static.py")
         sys.exit(1)
 
-    print("Statik features yükleniyor...")
+    print("Statik features_old yükleniyor...")
     static_df = pd.read_parquet(STATIC_PARQUET)
     print(f"  Satır: {len(static_df):,} | Kolon: {len(static_df.columns):,}")
 
@@ -46,14 +46,14 @@ def main():
     df = meta.merge(static_df, on="sha256", how="inner")
     print(f"\nMetadata + Statik birleşimi: {len(df):,} satır")
 
-    # ── Dinamik features ──────────────────────────────────
+    # ── Dinamik features_old ──────────────────────────────────
     if not args.static_only:
         if not DYNAMIC_PARQUET.exists():
             print("UYARI: dynamic_features.parquet bulunamadı.")
             print("  Dinamik özellikler sıfır olarak doldurulacak.")
             args.static_only = True
         else:
-            print("Dinamik features yükleniyor...")
+            print("Dinamik features_old yükleniyor...")
             dyn_df = pd.read_parquet(DYNAMIC_PARQUET)
             print(f"  Satır: {len(dyn_df):,} | Kolon: {len(dyn_df.columns):,}")
             df = df.merge(dyn_df, on="sha256", how="left")

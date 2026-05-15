@@ -1,7 +1,7 @@
 # Data klasörü — büyük dosyalar, repo'ya girmiyor
 data/apks/
 data/dynamic_logs/
-data/features/
+data/features_old/
 data/metadata.csv
 data/*.csv.gz
 data/*.gz

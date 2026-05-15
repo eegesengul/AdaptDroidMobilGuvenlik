@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import json
 from pathlib import Path
@@ -26,9 +27,10 @@ from config import (
 
 MONKEY_EVENTS    = 500
 MONKEY_THROTTLE  = 200
-ANALYSIS_WAIT    = 60
+KEEPER_INTERVAL  = 8
 ADB              = "adb"
 FRIDA_HOOKS_JS   = Path(__file__).parent / "frida_hooks.js"
+BYPASS_HOOKS_JS  = Path(__file__).parent / "bypass_hooks.js"
 
 
 # ── ADB yardımcıları ───────────────────────────────────────
@@ -46,10 +48,35 @@ def adb(*args, timeout=30) -> str:
         sys.exit(1)
 
 
+def _find_aapt() -> str:
+    for name in ("aapt", "aapt.exe"):
+        try:
+            subprocess.run([name, "version"], capture_output=True, timeout=5)
+            return name
+        except Exception:
+            pass
+    import glob as _glob
+    for sdk_root in (
+        os.environ.get("ANDROID_HOME", ""),
+        os.environ.get("ANDROID_SDK_ROOT", ""),
+        os.path.expanduser("~/AppData/Local/Android/Sdk"),
+        os.path.expanduser("~/Android/Sdk"),
+    ):
+        if not sdk_root:
+            continue
+        for hit in sorted(_glob.glob(os.path.join(sdk_root, "build-tools", "*", "aapt.exe")), reverse=True):
+            return hit
+        for hit in sorted(_glob.glob(os.path.join(sdk_root, "build-tools", "*", "aapt")), reverse=True):
+            return hit
+    return "aapt"
+
+AAPT = _find_aapt()
+
+
 def get_package_name(apk_path: str) -> str | None:
     try:
         out = subprocess.check_output(
-            ["aapt", "dump", "badging", apk_path],
+            [AAPT, "dump", "badging", apk_path],
             stderr=subprocess.DEVNULL, timeout=20
         ).decode(errors="ignore")
         m = re.search(r"package: name='([^']+)'", out)
@@ -84,10 +111,29 @@ def launch_app(package: str):
 def run_monkey(package: str):
     subprocess.Popen([
         ADB, "shell", "monkey", "-p", package,
-        "--throttle", str(MONKEY_THROTTLE),
+        "--throttle",       str(MONKEY_THROTTLE),
         "--ignore-crashes", "--ignore-timeouts",
+        "--pct-syskeys",    "0",
+        "--pct-appswitch",  "0",
+        "--pct-majornav",   "0",
+        "--pct-nav",        "0",
+        "--pct-trackball",  "0",
+        "--pct-touch",      "60",
+        "--pct-motion",     "25",
+        "--pct-pinchzoom",  "10",
+        "--pct-anyevent",   "5",
         str(MONKEY_EVENTS)
-    ])
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def foreground_keeper(package: str, stop_event):
+    """Analiz boyunca bildirim panelini kapatır ve uygulamayı ön planda tutar."""
+    while not stop_event.wait(KEEPER_INTERVAL):
+        adb("shell", "cmd", "statusbar", "collapse", timeout=3)
+        ps_out = adb("shell", f"ps -A | grep {package}", timeout=5)
+        if package in ps_out:
+            adb("shell", "monkey", "-p", package,
+                "-c", "android.intent.category.LAUNCHER", "1", timeout=5)
 
 
 def collect_logcat(log_path: str):
@@ -120,60 +166,126 @@ def _get_pid(package: str, retries: int = 3, delay: float = 1.5) -> int | None:
     return None
 
 def _get_frida_device():
-    """TCP üzerinden Frida device döner (emülatör için)."""
+    """USB üzerinden Frida device döner (emülatör için)."""
     import frida
-    dm = frida.get_device_manager()
     try:
-        return dm.add_remote_device("localhost:27042")
+        return frida.get_usb_device(timeout=10)
     except Exception:
+        dm = frida.get_device_manager()
         devices = dm.enumerate_devices()
-        device = next((d for d in devices if "localhost" in str(d.id)), None)
+        device = next((d for d in devices if d.type in ("usb", "local")), None)
         if device is None:
-            raise RuntimeError("localhost:27042 cihazı bulunamadı")
+            raise RuntimeError("Frida USB/local cihazı bulunamadı")
         return device
 
 
-def frida_spawn(package: str):
-    """App'i Frida ile spawn eder (suspend), hook'ları yükler, resume eder.
-    İlk instruction'dan itibaren tüm Java çağrılarını yakalar.
-    Döner: (session, events) — events listesi on_message ile doldurulur.
+def _restart_frida_server():
+    """DeadSystemException sonrası frida-server'ı yeniden başlat."""
+    print("  [frida-restart] sistem kurtarılıyor, frida-server yeniden başlatılıyor...")
+    adb("shell", "pkill", "-f", "frida-server", timeout=5)
+    time.sleep(5)
+    subprocess.Popen(
+        [ADB, "shell", "/data/local/tmp/frida-server &"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    time.sleep(4)
+    adb("forward", "tcp:27042", "tcp:27042", timeout=5)
+    print("  [frida-restart] tamamlandı")
+
+
+def _ensure_selinux_permissive():
+    """SELinux'u permissive moduna al — API 33'te ptrace için gerekli."""
+    try:
+        out = adb("shell", "getenforce", timeout=5)
+        if "Enforcing" in out:
+            adb("shell", "setenforce", "0", timeout=5)
+    except Exception:
+        pass
+
+
+def _load_hook_script() -> str:
+    """📦 başlık satırlarını atar, frida-java-bridge dahil tüm scripti döner."""
+    raw = FRIDA_HOOKS_JS.read_text(encoding="utf-8")
+    lines = raw.splitlines(keepends=True)
+    # İlk 3 satır: 📦 / "448085 /hooks.js" / ✄  — Frida 17.x bunları "Malformed package" olarak reddeder
+    if lines and lines[0].strip() == "\U0001f4e6":
+        return "".join(lines[3:])
+    return raw
+
+
+def frida_spawn(package: str, use_bypass: bool = False):
+    """App'i Frida ile spawn veya attach eder, hook'ları yükler.
+    Döner: (session, events, pid)
     """
     try:
         import frida
-        script_src = FRIDA_HOOKS_JS.read_text(encoding="utf-8")
+        script_src = _load_hook_script()
+        if use_bypass and BYPASS_HOOKS_JS.exists():
+            bypass_src = BYPASS_HOOKS_JS.read_text(encoding="utf-8")
+            script_src = bypass_src + "\n" + script_src
         events = []
 
         device = _get_frida_device()
 
-        # App'i suspend halde başlat
-        pid = device.spawn([package])
+        # Spawn dene
+        try:
+            pid = device.spawn([package])
+            session = device.attach(pid)
+            script  = session.create_script(script_src)
+            script.on("message", lambda msg, _: events.append(msg["payload"]) if msg.get("type") == "send" else None)
+            script.load()
+            device.resume(pid)
+            return session, events, pid
+        except Exception as spawn_err:
+            # Spawn başarısız (InvocationTargetException, API 33 uyumsuzluğu vb.)
+            print(f"  [spawn-err] {package}: {spawn_err}")
+            if "DeadSystem" in str(spawn_err):
+                _restart_frida_server()
+            try:
+                adb("shell", "am", "force-stop", package)
+            except Exception:
+                pass
+            time.sleep(2)
 
-        session = device.attach(pid)
-        script  = session.create_script(script_src)
+        # Attach modu: SELinux'u permissive yap, uygulamayı elle başlat
+        _ensure_selinux_permissive()
+        launch_app(package)
+        time.sleep(5)
 
-        def on_message(msg, _data):
-            if msg.get("type") == "send":
-                events.append(msg["payload"])
+        attach_pid = _get_pid(package, retries=5, delay=2.0)
+        if attach_pid is None:
+            raise RuntimeError(f"Uygulama başlatılamadı veya PID alınamadı: {package}")
 
-        script.on("message", on_message)
-        script.load()
+        # Attach için retry (process başlamayı bitirmemiş olabilir)
+        last_err = None
+        for _ in range(3):
+            try:
+                session = device.attach(attach_pid)
+                script  = session.create_script(script_src)
+                script.on("message", lambda msg, _: events.append(msg["payload"]) if msg.get("type") == "send" else None)
+                script.load()
+                return session, events, attach_pid
+            except Exception as attach_err:
+                last_err = attach_err
+                time.sleep(2)
 
-        # Hook'lar yüklendi, şimdi resume et
-        device.resume(pid)
-        return session, events, pid
+        raise RuntimeError(f"Attach başarısız (3 deneme): {last_err}")
 
     except Exception as e:
         print(f"  [Frida-spawn] başarısız: {e} — logcat moduna geçiliyor")
         return None, [], None
 
 
-def frida_attach(package: str, pid: int | None = None):
+def frida_attach(package: str, pid: int | None = None, use_bypass: bool = False):
     """Çalışan process'e attach et (spawn başarısız olursa fallback).
     Döner: (session, events)
     """
     try:
         import frida
-        script_src = FRIDA_HOOKS_JS.read_text(encoding="utf-8")
+        script_src = _load_hook_script()
+        if use_bypass and BYPASS_HOOKS_JS.exists():
+            bypass_src = BYPASS_HOOKS_JS.read_text(encoding="utf-8")
+            script_src = bypass_src + "\n" + script_src
         events = []
 
         device = _get_frida_device()
@@ -325,7 +437,8 @@ def parse_frida_log(frida_log_path: str) -> dict:
 # ── Ana pipeline ───────────────────────────────────────────
 
 def analyze_apk(sha256: str, apk_path: str, use_frida: bool = True,
-                frida_only: bool = False) -> dict | None:
+                frida_only: bool = False, analysis_wait: int = 60,
+                use_bypass: bool = False) -> dict | None:
     """APK analiz eder.
     frida_only=True → Frida hook kurulamazsa None döner (APK atlanır).
     """
@@ -345,33 +458,40 @@ def analyze_apk(sha256: str, apk_path: str, use_frida: bool = True,
         time.sleep(1)
 
         frida_events = []
-        spawn_pid = None
         if use_frida:
-            # SPAWN modu: app suspend başlar, hook yüklenir, sonra resume
-            # İlk instruction'dan itibaren tüm Java çağrıları yakalanır
-            frida_session, frida_events, spawn_pid = frida_spawn(package)
+            frida_session, frida_events, _ = frida_spawn(package, use_bypass=use_bypass)
 
             if frida_session is None:
                 if frida_only:
-                    # Spawn başarısız + sadece Frida modu → attach denemeden hemen çık
                     return None  # finally → uninstall
-                # Spawn başarısız → app'i elle başlat + monkey + geç attach
                 launch_app(package)
                 run_monkey(package)
                 pid = _get_pid(package)
-                frida_session, frida_events = frida_attach(package, pid=pid)
+                frida_session, frida_events = frida_attach(package, pid=pid, use_bypass=use_bypass)
                 if frida_only and frida_session is None:
-                    # Attach da başarısız → erken çık
                     return None  # finally → uninstall
             else:
-                # Spawn başarılı → monkey'i de başlat (ek etkileşim)
                 run_monkey(package)
 
-            time.sleep(ANALYSIS_WAIT)
+            stop_keeper = threading.Event()
+            keeper = threading.Thread(
+                target=foreground_keeper, args=(package, stop_keeper), daemon=True
+            )
+            keeper.start()
+            time.sleep(analysis_wait)
+            stop_keeper.set()
+            keeper.join(timeout=KEEPER_INTERVAL + 2)
         else:
             launch_app(package)
             run_monkey(package)
-            time.sleep(ANALYSIS_WAIT)
+            stop_keeper = threading.Event()
+            keeper = threading.Thread(
+                target=foreground_keeper, args=(package, stop_keeper), daemon=True
+            )
+            keeper.start()
+            time.sleep(analysis_wait)
+            stop_keeper.set()
+            keeper.join(timeout=KEEPER_INTERVAL + 2)
 
         collect_logcat(log_path)
         force_stop(package)
@@ -402,17 +522,22 @@ def analyze_apk(sha256: str, apk_path: str, use_frida: bool = True,
     return feats
 
 
-def _save(results: list, done_sha: set):
-    """Sonuçları parquet'e yaz. Mevcut dosya varsa her zaman merge et
-    (--resume olmadan çalışıldığında eski yılların üzerine yazılmasın)."""
+def _save(results: list, done_sha: set, out_path: Path = DYNAMIC_PARQUET,
+          overwrite_sha: set | None = None):
+    """Sonuçları parquet'e yaz.
+    overwrite_sha: bu SHA256'lar için eski kayıt silinip yeni veri yazılır (yeniden analiz).
+    """
     if not results:
         return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     df_new = pd.DataFrame(results)
-    if DYNAMIC_PARQUET.exists():          # done_sha koşulu kaldırıldı — her zaman merge
-        df_old = pd.read_parquet(DYNAMIC_PARQUET)
+    if out_path.exists():
+        df_old = pd.read_parquet(out_path)
+        if overwrite_sha:
+            df_old = df_old[~df_old["sha256"].str.upper().isin(overwrite_sha)]
         df_new = pd.concat([df_old, df_new], ignore_index=True)
         df_new = df_new.drop_duplicates(subset="sha256")
-    df_new.to_parquet(DYNAMIC_PARQUET, index=False)
+    df_new.to_parquet(out_path, index=False)
 
 
 def main():
@@ -427,10 +552,29 @@ def main():
     parser.add_argument("--benign",      action="store_true",   help="Benign APKları analiz et (label=0)")
     parser.add_argument("--apk-dir",     type=str, default=None,
                         help="Metadata yerine doğrudan APK klasörü (orn: data/apks/benign/2020)")
+    parser.add_argument("--output",      type=str, default=None,
+                        help="Çıktı parquet yolu (varsayılan: features_old/<yil>/dynamic_features.parquet)")
+    parser.add_argument("--sha256-list", type=str, default=None,
+                        help="Sadece bu dosyadaki SHA256'ları analiz et (yeniden analiz için); mevcut kayıtların üzerine yazar")
+    parser.add_argument("--analysis-wait", type=int, default=60,
+                        help="Uygulama çalıştırma süresi (saniye, varsayılan: 60)")
+    parser.add_argument("--known-only", action="store_true",
+                        help="Sadece mevcut parquet'te frida_used=1 olan APK'ları analiz et")
+    parser.add_argument("--bypass", action="store_true",
+                        help="SSL pinning / root detection / emulator detection bypass uygula")
     args = parser.parse_args()
 
     DYNAMIC_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     FEATURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Çıktı yolunu belirle
+    if args.output:
+        out_parquet = Path(args.output)
+    elif args.apk_dir:
+        year_part = Path(args.apk_dir).name  # orn: "2023"
+        out_parquet = FEATURES_DIR / year_part / "dynamic_features.parquet"
+    else:
+        out_parquet = DYNAMIC_PARQUET
 
     # APK klasörü doğrudan verilmişse metadata'ya gerek yok
     if args.apk_dir:
@@ -458,16 +602,33 @@ def main():
             if args.benign:
                 dynamic_apks = dynamic_apks[dynamic_apks.label == 0].reset_index(drop=True)
 
+    # Sadece daha önce Frida ile başarıyla analiz edilenleri filtrele
+    if args.known_only:
+        if out_parquet.exists():
+            df_existing = pd.read_parquet(out_parquet, columns=["sha256", "frida_used"])
+            known_sha = set(df_existing[df_existing["frida_used"] == 1]["sha256"].str.upper())
+            dynamic_apks = dynamic_apks[dynamic_apks["sha256"].str.upper().isin(known_sha)].reset_index(drop=True)
+            print(f"--known-only: {len(known_sha)} frida_used=1 kayıt → havuzdan {len(dynamic_apks)} APK eşleşti")
+        else:
+            print("UYARI: --known-only verildi ama parquet bulunamadı, tüm havuz kullanılıyor.")
+
+    # SHA256 listesi verilmişse havuzu o listeyle kısıtla
+    rerun_sha: set = set()
+    if args.sha256_list:
+        rerun_sha = {h.strip().upper() for h in Path(args.sha256_list).read_text().splitlines() if h.strip()}
+        dynamic_apks = dynamic_apks[dynamic_apks["sha256"].str.upper().isin(rerun_sha)].reset_index(drop=True)
+        print(f"--sha256-list: {len(rerun_sha)} SHA256 → havuzdan {len(dynamic_apks)} APK eşleşti")
+
     if args.limit:
         dynamic_apks = dynamic_apks.head(args.limit)
 
     frida_tag = "KAPALI" if args.no_frida else ("SADECE FRİDA" if args.frida_only else "AÇIK")
     target_tag = f" | Hedef: {args.target}" if args.target else ""
-    print(f"Dinamik analiz APK havuzu: {len(dynamic_apks):,} | Frida: {frida_tag}{target_tag}")
+    print(f"Dinamik analiz APK havuzu: {len(dynamic_apks):,} | Frida: {frida_tag} | Bekleme: {args.analysis_wait}s{target_tag}")
 
     done_sha = set()
-    if args.resume and DYNAMIC_PARQUET.exists():
-        done = pd.read_parquet(DYNAMIC_PARQUET, columns=["sha256"])
+    if args.resume and out_parquet.exists():
+        done = pd.read_parquet(out_parquet, columns=["sha256"])
         done_sha = set(s.upper() for s in done["sha256"].tolist())
         dynamic_apks = dynamic_apks[~dynamic_apks.sha256.str.upper().isin(done_sha)]
         print(f"Kalan havuz: {len(dynamic_apks):,}")
@@ -477,36 +638,52 @@ def main():
         print("UYARI: Emülatör bulunamadı. Android Studio'dan başlat.")
         return
 
-    results, failed, skipped_frida = [], 0, 0
+    if not args.no_frida:
+        _ensure_selinux_permissive()
 
-    for _, row in tqdm(dynamic_apks.iterrows(), total=len(dynamic_apks), desc="Dinamik analiz"):
+    results, failed, skipped_frida = [], 0, 0
+    session_skip: set = set()  # Bu session'da zaten başarısız olan sha256'lar
+
+    with tqdm(dynamic_apks.iterrows(), total=len(dynamic_apks), desc="Dinamik analiz") as bar:
+      for _, row in bar:
         # Hedefe ulaşıldıysa dur
         if args.target and len(results) >= args.target:
             break
+
+        sha = str(row["sha256"]).upper()
+        if sha in session_skip:
+            skipped_frida += 1
+            bar.set_postfix_str(f"Frida:{len(results)} Atlanan:{skipped_frida}")
+            continue
 
         res = analyze_apk(
             row["sha256"], row["apk_path"],
             use_frida=not args.no_frida,
             frida_only=args.frida_only,
+            analysis_wait=args.analysis_wait,
+            use_bypass=args.bypass,
         )
         if res:
             results.append(res)
         elif args.frida_only:
-            skipped_frida += 1  # Frida tutunmadı, atlandı
+            session_skip.add(sha)
+            skipped_frida += 1
         else:
             failed += 1
 
-        if len(results) % 20 == 0 and results:
-            _save(results, done_sha)
+        bar.set_postfix_str(f"Frida:{len(results)} Atlanan:{skipped_frida}")
 
-    _save(results, done_sha)
+        if len(results) % 20 == 0 and results:
+            _save(results, done_sha, out_parquet, overwrite_sha=rerun_sha or None)
+
+    _save(results, done_sha, out_parquet, overwrite_sha=rerun_sha or None)
 
     frida_line = f" | Frida tutunmadı (atlandı): {skipped_frida:,}" if args.frida_only else ""
     print(f"\nBaşarılı: {len(results):,} | Başarısız: {failed:,}{frida_line}")
     if args.target:
         status = "✓ HEDEFE ULAŞILDI" if len(results) >= args.target else "✗ Havuz tükendi"
         print(f"Hedef {args.target} → {status}")
-    print(f"Kaydedildi -> {DYNAMIC_PARQUET}")
+    print(f"Kaydedildi -> {out_parquet}")
 
 
 if __name__ == "__main__":
