@@ -257,6 +257,8 @@ def setup_emulator_for_analysis(serial):
     adb(serial, "shell", "settings put system user_rotation 0", timeout=5)
     # wm user-rotation sadece yeni Android build'lerinde var, hata verirse sorun değil
     adb(serial, "shell", "wm user-rotation lock 0", timeout=5)
+    # Önceki APK'dan kalmış takılı monkey süreçlerini temizle
+    adb(serial, "shell", "pkill -f monkey", timeout=5)
 
 
 # ── Emülatör başına işlemler ───────────────────────────────
@@ -283,7 +285,7 @@ def launch_app(serial, package):
 
 
 def run_monkey(serial, package):
-    subprocess.Popen(
+    return subprocess.Popen(
         ["adb", "-s", serial, "shell", "monkey", "-p", package,
          "--throttle",        str(MONKEY_THROTTLE),
          "--ignore-crashes",  "--ignore-timeouts",
@@ -600,16 +602,17 @@ def analyze_apk(serial, sha256, apk_path, use_frida=True, use_bypass=False, anal
         time.sleep(1)
 
         frida_events = []
+        monkey_proc = None
         if use_frida:
             frida_session, frida_events, _ = frida_spawn(serial, package, use_bypass=use_bypass)
             if frida_session is None:
                 launch_app(serial, package)
-                run_monkey(serial, package)
+                monkey_proc = run_monkey(serial, package)
             else:
-                run_monkey(serial, package)
+                monkey_proc = run_monkey(serial, package)
         else:
             launch_app(serial, package)
-            run_monkey(serial, package)
+            monkey_proc = run_monkey(serial, package)
 
         # Uygulama başlar başlamaz beliren diyalogları hemen kapat
         time.sleep(3)
@@ -625,6 +628,14 @@ def analyze_apk(serial, sha256, apk_path, use_frida=True, use_bypass=False, anal
         time.sleep(analysis_wait)
         stop_keeper.set()
         keeper.join(timeout=KEEPER_INTERVAL + 2)
+
+        # Takılı kalabilen monkey'i zorla sonlandır
+        if monkey_proc is not None:
+            try:
+                monkey_proc.terminate()
+            except Exception:
+                pass
+        adb(serial, "shell", "pkill -f monkey", timeout=5)
 
         collect_logcat(serial, log_path)
         force_stop(serial, package)
