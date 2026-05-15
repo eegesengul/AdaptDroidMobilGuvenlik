@@ -1,5 +1,5 @@
 """
-Tum benign yillarini sirayla analiz eder.
+Tum benign yillarini N emülatörle paralel analiz eder.
 Emulator offline, frida ölü, parquet bozuk, pipeline takili gibi
 durumlarda otomatik kurtarir.
 Calistir: python run_benign_all.py
@@ -13,22 +13,19 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
-YEARS         = [2016, 2017, 2018, 2019, 2020, 2021]
-AVD_NAME      = "Pixel_3"
-SNAPSHOT      = "clean"
-ANALYSIS_WAIT = 300
-MAX_RETRIES   = 9999
-RETRY_DELAY   = 45
+YEARS           = [2016, 2017, 2018, 2019, 2020, 2021]
+NUM_EMULATORS   = 2                          # kac emulator kullanilacak
+AVD_NAMES       = [f"Pixel_3_{i+1}" for i in range(NUM_EMULATORS)]
+SNAPSHOT        = "clean"
+ANALYSIS_WAIT   = 300
+MAX_RETRIES     = 9999
+RETRY_DELAY     = 45
 
-# Emulator hizli bitiyorsa (saniyelerde) cihaz offline demektir
-MIN_SANE_DURATION = 30
-
-# Bir APK icin maksimum bekleme suresi (saniye). Bu katiyla carpilarak
-# toplam subprocess timeout hesaplanir.
+MIN_SANE_DURATION   = 30
 MAX_SECONDS_PER_APK = ANALYSIS_WAIT + 120   # 420s / APK
 
-FRIDA_SERVER  = "/data/local/tmp/frida-server"
-SDK_EMU       = Path.home() / "AppData/Local/Android/Sdk/emulator/emulator.exe"
+FRIDA_SERVER = "/data/local/tmp/frida-server"
+SDK_EMU      = Path.home() / "AppData/Local/Android/Sdk/emulator/emulator.exe"
 
 LOG_FILE = Path("data/dynamic_logs/benign_all_run.log")
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -57,115 +54,109 @@ def _adb(*args, timeout=10) -> str:
         return ""
 
 
-def online_serial() -> str | None:
-    """Cihazlar listesinden ilk 'device' durumundaki emulator serialini dondur."""
+def online_serials() -> list[str]:
+    """Tum 'device' durumundaki emulator seriallerini dondur."""
     out = _adb("devices")
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) == 2 and parts[1] == "device" and parts[0].startswith("emulator-"):
-            return parts[0]
-    return None
+    return [
+        line.split()[0]
+        for line in out.splitlines()
+        if len(line.split()) == 2
+        and line.split()[1] == "device"
+        and line.split()[0].startswith("emulator-")
+    ]
 
 
-def wait_for_online(timeout=180) -> str | None:
-    log.info("  Emulator online olana kadar bekleniyor...")
+def wait_for_online(timeout=300) -> list[str]:
+    """NUM_EMULATORS kadar serial gelene kadar bekle."""
+    log.info(f"  {NUM_EMULATORS} emulator online olana kadar bekleniyor...")
     deadline = time.time() + timeout
     while time.time() < deadline:
-        serial = online_serial()
-        if serial:
-            for _ in range(20):
-                out = _adb("-s", serial, "shell", "getprop", "sys.boot_completed")
-                if out.strip() == "1":
-                    log.info(f"  Emulator hazir: {serial}")
-                    return serial
-                time.sleep(5)
+        serials = online_serials()
+        booted = []
+        for s in serials:
+            if _adb("-s", s, "shell", "getprop", "sys.boot_completed").strip() == "1":
+                booted.append(s)
+        if len(booted) >= NUM_EMULATORS:
+            log.info(f"  Tum emulatorler hazir: {booted}")
+            return booted[:NUM_EMULATORS]
         time.sleep(5)
-    return None
-
-
-def kill_offline_emulators():
-    out = _adb("devices")
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) == 2 and parts[1] == "offline" and parts[0].startswith("emulator-"):
-            log.info(f"  Offline emulator kapatiliyor: {parts[0]}")
-            _adb("-s", parts[0], "emu", "kill", timeout=5)
+    # Zaman asimi: elinde ne varsa dondur
+    booted = [s for s in online_serials()
+              if _adb("-s", s, "shell", "getprop", "sys.boot_completed").strip() == "1"]
+    return booted
 
 
 def kill_all_emulators():
-    """Calisir durumdaki tum emulatorleri kapat."""
     out = _adb("devices")
     for line in out.splitlines():
         parts = line.split()
         if len(parts) == 2 and parts[0].startswith("emulator-"):
-            log.info(f"  Emulator kapatiliyor: {parts[0]}")
             _adb("-s", parts[0], "emu", "kill", timeout=5)
-    time.sleep(3)
+    time.sleep(4)
 
 
-def start_emulator() -> str | None:
-    """Cold boot ile emulator baslatir, clean snapshot yukler, online olmasini bekler."""
-    kill_all_emulators()
-    time.sleep(5)
-
+def start_emulator(avd_name: str):
+    """Tek bir AVD'yi cold boot ile baslatir (arka planda)."""
     if not SDK_EMU.exists():
         log.error(f"  emulator.exe bulunamadi: {SDK_EMU}")
-        return None
-
-    log.info(f"  Emulator cold-boot ile baslatiliyor: {AVD_NAME}")
+        return
+    log.info(f"  Emulator baslatiliyor: {avd_name}")
     subprocess.Popen(
-        [str(SDK_EMU), "-avd", AVD_NAME, "-no-audio", "-no-window", "-no-snapshot-load"],
+        [str(SDK_EMU), "-avd", avd_name, "-no-audio", "-no-window", "-no-snapshot-load"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    time.sleep(10)
-    serial = wait_for_online(timeout=300)
-    if serial is None:
-        log.error("  Cold boot sonrasi emulator online olmadi.")
-        return None
 
-    # Clean snapshot yukle (frida-server ve ayarlar icin)
-    log.info(f"  [{serial}] Clean snapshot yukleniyor: '{SNAPSHOT}'")
-    out = _adb("-s", serial, "emu", "avd", "snapshot", "load", SNAPSHOT, timeout=60)
-    log.info(f"  Snapshot yaniti: {out[:80] if out else '(bos)'}")
+
+def start_all_emulators() -> list[str]:
+    """Tum AVD'leri cold boot ile baslatir, online olana kadar bekler."""
+    kill_all_emulators()
+    time.sleep(3)
+    for avd in AVD_NAMES:
+        start_emulator(avd)
+        time.sleep(3)          # port catismasini onlemek icin
     time.sleep(8)
-
-    # Snapshot sonrasi boot bekleme
-    for _ in range(24):
-        if _adb("-s", serial, "shell", "getprop", "sys.boot_completed").strip() == "1":
-            log.info(f"  [{serial}] Snapshot sonrasi boot tamamlandi.")
-            return serial
-        time.sleep(5)
-
-    log.warning("  Snapshot sonrasi boot tamamlanamadi, devam ediliyor.")
-    return serial
+    serials = wait_for_online(timeout=360)
+    if not serials:
+        log.error("  Hic emulator online olmadi!")
+    return serials
 
 
-def ensure_emulator() -> str | None:
-    """Online emulator yoksa baslatip serialini dondur."""
-    serial = online_serial()
-    if serial:
-        return serial
-    log.warning("  Hic online emulator yok, baslatiliyor...")
-    return start_emulator()
+def ensure_all_emulators() -> list[str]:
+    """Online emulator sayisi yetersizse eksikleri baslatir."""
+    serials = [s for s in online_serials()
+               if _adb("-s", s, "shell", "getprop", "sys.boot_completed").strip() == "1"]
+    if len(serials) >= NUM_EMULATORS:
+        return serials[:NUM_EMULATORS]
+    log.warning(f"  {len(serials)}/{NUM_EMULATORS} emulator online — eksikler baslatiliyor...")
+    return start_all_emulators()
 
 
 def start_frida_server(serial: str):
-    """Frida-server'i oldur ve yeniden baslat."""
     _adb("-s", serial, "shell", "pkill -f frida-server", timeout=5)
     time.sleep(2)
     _adb("-s", serial, "shell", f"su 0 nohup {FRIDA_SERVER} &>/dev/null &", timeout=5)
     time.sleep(4)
-    # Kontrol
     out = _adb("-s", serial, "shell", "ps 2>/dev/null | grep frida-server", timeout=5)
     if "frida-server" in out:
         log.info(f"  [{serial}] frida-server calisiyor.")
     else:
-        log.warning(f"  [{serial}] frida-server baslatılamadi! Analiz Frida olmadan devam edecek.")
+        log.warning(f"  [{serial}] frida-server baslatılamadi!")
+
+
+def restore_snapshot(serial: str) -> bool:
+    log.info(f"  [{serial}] Snapshot restore: '{SNAPSHOT}'")
+    _adb("-s", serial, "emu", "avd", "snapshot", "load", SNAPSHOT, timeout=60)
+    time.sleep(8)
+    for _ in range(24):
+        if _adb("-s", serial, "shell", "getprop", "sys.boot_completed").strip() == "1":
+            return True
+        time.sleep(5)
+    return False
 
 
 def setup_emulator(serial: str):
-    """Portrait kilidi, animasyonlar kapali, monkey temizle, frida-server yeniden baslat."""
+    """Portrait, animasyonsuz, monkey temizle, frida yeniden baslat."""
     cmds = [
         "settings put global stay_on_while_plugged_in 3",
         "settings put system screen_off_timeout 2147483647",
@@ -185,16 +176,9 @@ def setup_emulator(serial: str):
     log.info(f"  [{serial}] Emulator ayarlari uygulandı.")
 
 
-def restore_snapshot(serial: str) -> bool:
-    """Clean snapshot yukle ve boot bekle. Basarili olursa True doner."""
-    log.info(f"  [{serial}] Snapshot restore: '{SNAPSHOT}'")
-    _adb("-s", serial, "emu", "avd", "snapshot", "load", SNAPSHOT, timeout=60)
-    time.sleep(8)
-    for _ in range(24):
-        if _adb("-s", serial, "shell", "getprop", "sys.boot_completed").strip() == "1":
-            return True
-        time.sleep(5)
-    return False
+def setup_all_emulators(serials: list[str]):
+    for s in serials:
+        setup_emulator(s)
 
 
 # ── Pipeline yardimcilari ─────────────────────────────────
@@ -215,7 +199,7 @@ def count_done(year: int) -> int:
         import pandas as pd
         return len(pd.read_parquet(out))
     except Exception:
-        log.warning(f"  Bozuk parquet dosyasi siliniyor: {out}")
+        log.warning(f"  Bozuk parquet siliniyor: {out}")
         try:
             out.unlink()
         except Exception:
@@ -223,13 +207,13 @@ def count_done(year: int) -> int:
         return 0
 
 
-def build_cmd(year: int, serial: str) -> list[str]:
+def build_cmd(year: int, serials: list[str]) -> list[str]:
     return [
         sys.executable, "src/03_dynamic/run_dynamic_parallel.py",
         "--apk-dir",        str(apk_dir(year)),
         "--year",           str(year),
         "--benign",
-        "--devices",        serial,
+        "--devices",        *serials,
         "--reset-every",    "25",
         "--snapshot",       SNAPSHOT,
         "--analysis-wait",  str(ANALYSIS_WAIT),
@@ -238,91 +222,79 @@ def build_cmd(year: int, serial: str) -> list[str]:
     ]
 
 
-def subprocess_timeout(total_apks: int, done: int) -> int:
-    """Kalan APK sayisina gore subprocess timeout hesapla (x1.8 guvenlik payi)."""
+def subprocess_timeout(total_apks: int, done: int, n_emus: int) -> int:
+    """Paralel emulator sayisina gore timeout hesapla."""
     remaining = max(total_apks - done, 1)
-    return int(remaining * MAX_SECONDS_PER_APK * 1.8)
+    per_emu   = (remaining + n_emus - 1) // n_emus   # tavan bolme
+    return int(per_emu * MAX_SECONDS_PER_APK * 1.8)
 
 
 # ── Ana dongu ─────────────────────────────────────────────
 
 def run_year(year: int):
     total = len(list(apk_dir(year).glob("*.apk")))
-    log.info(f"=== Yil {year} basliyor ({total} APK) ===")
+    log.info(f"=== Yil {year} basliyor ({total} APK, {NUM_EMULATORS} emulator) ===")
 
     for attempt in range(1, MAX_RETRIES + 1):
-        serial = ensure_emulator()
-        if serial is None:
-            log.error("  Emulator baslatılamadi! 60s sonra tekrar denenecek.")
+        serials = ensure_all_emulators()
+        if not serials:
+            log.error("  Hic emulator baslatılamadi! 60s sonra tekrar denenecek.")
             time.sleep(60)
             continue
 
-        setup_emulator(serial)
+        n = len(serials)
+        setup_all_emulators(serials)
 
         done_before = count_done(year)
-        timeout_s   = subprocess_timeout(total, done_before)
+        timeout_s   = subprocess_timeout(total, done_before, n)
         log.info(
             f"  [{year}] Deneme #{attempt} | Tamamlanan: {done_before}/{total} "
-            f"| Cihaz: {serial} | Timeout: {timeout_s//3600}s{(timeout_s%3600)//60}dk"
+            f"| Cihazlar: {serials} | Timeout: {timeout_s//3600}s{(timeout_s%3600)//60}dk"
         )
 
         t0 = time.time()
         try:
-            result = subprocess.run(build_cmd(year, serial), timeout=timeout_s)
+            result = subprocess.run(build_cmd(year, serials), timeout=timeout_s)
             rc = result.returncode
         except subprocess.TimeoutExpired:
-            log.error(
-                f"  [{year}] TIMEOUT! {timeout_s}s sonra hala bitmedi — "
-                f"pipeline takilmis. Emulator yeniden baslatiliyor."
-            )
+            log.error(f"  [{year}] TIMEOUT! Pipeline takilmis. Sert reset yapiliyor.")
             rc = -1
 
-        elapsed = time.time() - t0
+        elapsed  = time.time() - t0
         done_after = count_done(year)
-        gained     = done_after - done_before
+        gained   = done_after - done_before
 
-        # Basari: yeterli APK tamamlandi
         if rc == 0 and done_after >= total * 0.95:
-            log.info(f"  [{year}] TAMAMLANDI ({done_after}/{total} APK kaydedildi)")
+            log.info(f"  [{year}] TAMAMLANDI ({done_after}/{total} APK)")
             return
 
-        # Exit 0 ama az APK: sessiz hata
         if rc == 0 and done_after < total * 0.95:
             log.warning(
                 f"  [{year}] exit 0 ama sadece {done_after}/{total} APK "
                 f"(%{100*done_after//total if total else 0}) — yeniden baslatiliyor"
             )
 
-        log.warning(
-            f"  [{year}] rc={rc} | +{gained} APK | Sure={elapsed:.0f}s"
-        )
+        log.warning(f"  [{year}] rc={rc} | +{gained} APK | Sure={elapsed:.0f}s")
 
-        # Hizli bitis veya hic ilerleme yoksa: emulator/frida bozuk
         need_hard_reset = elapsed < MIN_SANE_DURATION or (elapsed > 120 and gained == 0)
-
         if need_hard_reset:
-            log.warning("  Sert reset: emulator yeniden baslatiliyor...")
-            serial = start_emulator()
-            if serial is None:
-                log.error("  Emulator baslatılamadi, 60s bekleniyor...")
-                time.sleep(60)
+            log.warning("  Sert reset: tum emulatorler yeniden baslatiliyor...")
+            start_all_emulators()
         else:
-            # Hafif reset: sadece snapshot geri yukle + frida yeniden baslat
             log.info("  Hafif reset: snapshot restore + frida yeniden baslatma...")
-            ok = restore_snapshot(serial)
-            if not ok:
-                log.warning("  Snapshot restore basarisiz, sert reset deneniyor...")
-                serial = start_emulator()
-                if serial is None:
-                    time.sleep(60)
-                    continue
-            start_frida_server(serial)
+            for s in serials:
+                ok = restore_snapshot(s)
+                if not ok:
+                    log.warning(f"  [{s}] Snapshot restore basarisiz, sert reset deneniyor...")
+                    start_all_emulators()
+                    break
+                start_frida_server(s)
             time.sleep(RETRY_DELAY)
 
 
 def main():
     log.info(f"Benign analiz basliyor - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    log.info(f"  Yillar: {YEARS} | Analiz: {ANALYSIS_WAIT}s | AVD: {AVD_NAME}")
+    log.info(f"  Yillar: {YEARS} | AVD'ler: {AVD_NAMES} | Analiz: {ANALYSIS_WAIT}s")
 
     for year in YEARS:
         run_year(year)
