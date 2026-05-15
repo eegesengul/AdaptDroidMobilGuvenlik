@@ -208,8 +208,12 @@ def count_done(year: int) -> int:
         return 0
 
 
+def known_parquet_path(year: int) -> Path:
+    return Path(f"data/features/dynamic_features_benign/{year}/dynamic_features.parquet")
+
+
 def build_cmd(year: int, serials: list[str]) -> list[str]:
-    return [
+    cmd = [
         sys.executable, "src/03_dynamic/run_dynamic_parallel.py",
         "--apk-dir",        str(apk_dir(year)),
         "--year",           str(year),
@@ -221,6 +225,11 @@ def build_cmd(year: int, serials: list[str]) -> list[str]:
         "--bypass",
         "--output",         str(output_path(year)),
     ]
+    kp = known_parquet_path(year)
+    if kp.exists():
+        cmd += ["--known-parquet", str(kp)]
+        log.info(f"  [{year}] --known-parquet aktif: {kp}")
+    return cmd
 
 
 def subprocess_timeout(total_apks: int, done: int, n_emus: int) -> int:
