@@ -1,14 +1,17 @@
 """
 Tek komutla tam kurulum ve 2 emülatörle paralel analiz baslatma.
-Kullanim: python setup_and_run.py
+Kullanim:
+  python setup_and_run.py                          # benign (varsayilan)
+  python setup_and_run.py --malware                # malware
+  python setup_and_run.py --malware --years 2019 2020 --avds Pixel_4 Pixel_4_2
 
 Yaptiklarimiz:
   1. Android SDK / emulator.exe bul
   2. API-28 system image indir (yoksa)
-  3. Pixel_3_1 ve Pixel_3_2 AVD olustur (yoksa)
+  3. AVD'leri olustur (yoksa)
   4. frida-server indir + her emülatöre push et
   5. Her emülatörde clean snapshot kaydet
-  6. run_benign_all.py'yi baslatir (2 emülatörle)
+  6. run_benign_all.py veya run_malware_all.py baslatir
 """
 
 import io
@@ -322,12 +325,13 @@ def setup_emulators(emu: Path, frida_binary: Path) -> list[str]:
 
 # ── Adim 6: Pipeline baslat ───────────────────────────────
 
-def run_pipeline(years: list[int], avds: list[str] | None = None):
+def run_pipeline(years: list[int], avds: list[str] | None = None, malware: bool = False):
+    script    = "run_malware_all.py" if malware else "run_benign_all.py"
     years_str = " ".join(str(y) for y in years)
-    cmd = [sys.executable, "run_benign_all.py", "--years"] + [str(y) for y in years]
+    cmd = [sys.executable, script, "--years"] + [str(y) for y in years]
     if avds:
         cmd += ["--avds"] + avds
-    log.info(f"Pipeline baslatiliyor: run_benign_all.py --years {years_str}" +
+    log.info(f"Pipeline baslatiliyor: {script} --years {years_str}" +
              (f" --avds {' '.join(avds)}" if avds else ""))
     subprocess.run(cmd)
 
@@ -348,6 +352,10 @@ def main():
         metavar="AVD",
         help="Kullanilacak AVD isimleri (varsayilan: kod icindeki AVD_NAMES)"
     )
+    parser.add_argument(
+        "--malware", action="store_true",
+        help="Malware analizi yap (run_malware_all.py)"
+    )
     args = parser.parse_args()
 
     if args.avds:
@@ -355,8 +363,9 @@ def main():
         AVD_NAMES     = args.avds
         NUM_EMULATORS = len(AVD_NAMES)
 
+    mode = "Malware" if args.malware else "Benign"
     log.info("=" * 60)
-    log.info(f"  AdaptDroid Benign Analiz — {NUM_EMULATORS} Emülatör Kurulum & Baslatma")
+    log.info(f"  AdaptDroid {mode} Analiz — {NUM_EMULATORS} Emülatör Kurulum & Baslatma")
     log.info(f"  Yillar: {args.years}")
     log.info("=" * 60)
 
@@ -372,7 +381,7 @@ def main():
     log.info(f"Kurulum tamamlandi. Aktif emulatorler: {serials}")
     log.info("Pipeline basliyor...")
     log.info("")
-    run_pipeline(args.years, args.avds)
+    run_pipeline(args.years, args.avds, malware=args.malware)
 
 
 if __name__ == "__main__":
