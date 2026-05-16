@@ -370,14 +370,15 @@ def _frida_port_for(serial):
 def restart_frida_server(serial):
     port = _frida_port_for(serial)
     print(f"  [{serial}] frida-server yeniden başlatılıyor (port {port})...")
-    adb(serial, "shell", "pkill", "-f", "frida-server", timeout=5)
+    adb(serial, "shell", "pkill -f frida-server", timeout=5)
+    time.sleep(3)
+    # su 0 nohup ile root olarak başlat (process'lere attach edebilmek için şart)
+    adb(serial, "shell", "su 0 nohup /data/local/tmp/frida-server >/dev/null 2>&1 &", timeout=5)
     time.sleep(5)
-    subprocess.Popen(
-        ["adb", "-s", serial, "shell", "/data/local/tmp/frida-server &"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
-    time.sleep(4)
-    # Her emülatöre farklı yerel port → çakışma olmaz
+    ps_out = adb(serial, "shell", "ps -A 2>/dev/null | grep frida-server", timeout=5)
+    if "frida-server" not in ps_out:
+        print(f"  [{serial}] UYARI: frida-server başlatılamadı!")
+    # Her emülatöre benzersiz yerel port → çakışma olmaz
     adb(serial, "forward", f"tcp:{port}", "tcp:27042", timeout=5)
 
 
@@ -439,11 +440,17 @@ def load_hook_script(use_bypass=False):
 
 
 def frida_spawn(serial, package, use_bypass=False):
-    """Frida spawn/attach. Döner: (session, events, pid)"""
+    """Frida spawn/attach. Döner: (session, script, events, pid) — script GC'yi önlemek için döndürülür."""
     try:
         import frida
         script_src = load_hook_script(use_bypass=use_bypass)
         events = []
+
+        def _on_message(msg, _):
+            if msg.get("type") == "send":
+                events.append(msg["payload"])
+            elif msg.get("type") == "error":
+                print(f"  [{serial}] Frida script hatası: {msg.get('description', msg)[:200]}")
 
         dm = frida.get_device_manager()
         device = None
@@ -456,8 +463,8 @@ def frida_spawn(serial, package, use_bypass=False):
             port = _frida_port_for(serial)
             try:
                 device = dm.add_remote_device(f"127.0.0.1:{port}")
-            except Exception:
-                pass
+            except Exception as re:
+                print(f"  [{serial}] Frida remote device ({port}) hatası: {re}")
         if device is None:
             raise RuntimeError(f"Frida cihazı bulunamadı: {serial}")
 
@@ -465,12 +472,12 @@ def frida_spawn(serial, package, use_bypass=False):
             pid = device.spawn([package])
             session = device.attach(pid)
             script = session.create_script(script_src)
-            script.on("message", lambda msg, _: events.append(msg["payload"])
-                      if msg.get("type") == "send" else None)
+            script.on("message", _on_message)
             script.load()
             device.resume(pid)
-            return session, events, pid
+            return session, script, events, pid
         except Exception as spawn_err:
+            print(f"  [{serial}] Frida spawn hatası: {spawn_err}")
             if "DeadSystem" in str(spawn_err):
                 restart_frida_server(serial)
             try:
@@ -488,22 +495,23 @@ def frida_spawn(serial, package, use_bypass=False):
             raise RuntimeError(f"PID alınamadı: {package}")
 
         last_err = None
-        for _ in range(3):
+        for attempt in range(3):
             try:
                 session = device.attach(attach_pid)
                 script = session.create_script(script_src)
-                script.on("message", lambda msg, _: events.append(msg["payload"])
-                          if msg.get("type") == "send" else None)
+                script.on("message", _on_message)
                 script.load()
-                return session, events, attach_pid
+                return session, script, events, attach_pid
             except Exception as e:
                 last_err = e
+                print(f"  [{serial}] Frida attach denemesi {attempt+1}/3 başarısız: {e}")
                 time.sleep(2)
 
         raise RuntimeError(f"Attach başarısız: {last_err}")
 
     except Exception as e:
-        return None, [], None
+        print(f"  [{serial}] Frida bağlantı başarısız ({package}): {e}")
+        return None, None, [], None
 
 
 # ── Feature extraction ─────────────────────────────────────
@@ -514,25 +522,44 @@ def parse_logcat(log_path):
     except FileNotFoundError:
         log = ""
     return {
-        "network_event_count":    len(re.findall(r"connect|socket|http|https", log, re.I)),
-        "dns_query_count":        len(re.findall(r"getaddrinfo|nslookup|resolv", log, re.I)),
-        "crypto_count":           len(re.findall(r"javax\.crypto|AES|RSA|Cipher", log)),
-        "dex_loader_count":       len(re.findall(r"DexClassLoader|loadDex|BaseDex", log)),
-        "runtime_exec_count":     len(re.findall(r"Runtime\.exec|ProcessBuilder|/bin/sh", log)),
-        "sms_send_count":         len(re.findall(r"sendTextMessage|SmsManager", log)),
-        "sms_read_count":         len(re.findall(r"content://sms|content://mms", log)),
-        "contact_access_count":   len(re.findall(r"ContactsContract|getContacts|CONTACTS", log)),
-        "call_log_access_count":  len(re.findall(r"call_log|CallLog", log)),
-        "file_write_count":       len(re.findall(r"FileOutputStream|openFileOutput|FileWriter", log)),
-        "reflection_count":       len(re.findall(r"getDeclaredMethod|\.invoke\(|forName", log)),
-        "native_lib_count":       len(re.findall(r"System\.loadLibrary|dlopen", log)),
-        "camera_access_count":    len(re.findall(r"android\.hardware\.Camera|CameraManager|openCamera", log)),
-        "mic_access_count":       len(re.findall(r"AudioRecord|MediaRecorder|startRecording", log)),
-        "location_access_count":  len(re.findall(r"getLastKnownLocation|requestLocationUpdates|LocationManager", log)),
-        "clipboard_access_count": len(re.findall(r"ClipboardManager|getPrimaryClip", log)),
-        "device_admin_count":     len(re.findall(r"DevicePolicyManager|isAdminActive|BIND_DEVICE_ADMIN", log)),
-        "wakelock_count":         len(re.findall(r"acquireWakeLock|PARTIAL_WAKE_LOCK", log)),
-        "exception_count":        len(re.findall(r"FATAL EXCEPTION|AndroidRuntime.*Exception|ANR in", log)),
+        "network_event_count":    len(re.findall(
+            r"connect\(|HttpURLConnection|OkHttp|Retrofit|socket\(", log, re.I)),
+        "dns_query_count":        len(re.findall(
+            r"getaddrinfo|nslookup|resolv|getHostByName", log, re.I)),
+        "crypto_count":           len(re.findall(
+            r"javax\.crypto|Cipher\.getInstance|MessageDigest\.getInstance|KeyGenerator|SecretKeySpec", log)),
+        "dex_loader_count":       len(re.findall(
+            r"DexClassLoader|loadDex|BaseDex|InMemoryDex|PathClassLoader", log)),
+        "runtime_exec_count":     len(re.findall(
+            r"Runtime\.exec|ProcessBuilder|/bin/sh|/bin/su", log)),
+        "sms_send_count":         len(re.findall(
+            r"sendTextMessage|SmsManager|sendMultipartTextMessage", log)),
+        "sms_read_count":         len(re.findall(
+            r"content://sms|content://mms|SmsMessage", log)),
+        "contact_access_count":   len(re.findall(
+            r"ContactsContract|content://contacts|content://com\.android\.contacts", log)),
+        "call_log_access_count":  len(re.findall(
+            r"call_log|CallLog|content://calls|content://call_log", log)),
+        "file_write_count":       len(re.findall(
+            r"FileOutputStream|openFileOutput|FileWriter|createNewFile", log)),
+        "reflection_count":       len(re.findall(
+            r"getDeclaredMethod|getDeclaredField|getMethod\(|\.invoke\(|Class\.forName", log)),
+        "native_lib_count":       len(re.findall(
+            r"System\.loadLibrary|dlopen|nativeLoader|linker.*load", log, re.I)),
+        "camera_access_count":    len(re.findall(
+            r"Camera\.open|CameraManager|openCamera|camera2", log, re.I)),
+        "mic_access_count":       len(re.findall(
+            r"AudioRecord|MediaRecorder|startRecording|AudioFlinger.*record", log, re.I)),
+        "location_access_count":  len(re.findall(
+            r"LocationManager|FusedLocation|requestLocationUpdates|getLastLocation|getLastKnownLocation", log)),
+        "clipboard_access_count": len(re.findall(
+            r"ClipboardManager|getPrimaryClip|setPrimaryClip", log)),
+        "device_admin_count":     len(re.findall(
+            r"DevicePolicyManager|isAdminActive|BIND_DEVICE_ADMIN|setActiveAdmin", log)),
+        "wakelock_count":         len(re.findall(
+            r"acquireWakeLock|PARTIAL_WAKE_LOCK", log)),
+        "exception_count":        len(re.findall(
+            r"FATAL EXCEPTION|AndroidRuntime.*Exception|ANR in", log)),
     }
 
 
@@ -587,6 +614,7 @@ def analyze_apk(serial, sha256, apk_path, use_frida=True, use_bypass=False, anal
         return None
 
     frida_session = None
+    frida_script  = None  # script referansı burada tutulur — GC'yi önler
     try:
         if not install_apk(serial, apk_path):
             return None
@@ -604,7 +632,7 @@ def analyze_apk(serial, sha256, apk_path, use_frida=True, use_bypass=False, anal
         frida_events = []
         monkey_proc = None
         if use_frida:
-            frida_session, frida_events, _ = frida_spawn(serial, package, use_bypass=use_bypass)
+            frida_session, frida_script, frida_events, _ = frida_spawn(serial, package, use_bypass=use_bypass)
             if frida_session is None:
                 launch_app(serial, package)
                 monkey_proc = run_monkey(serial, package)
@@ -739,12 +767,14 @@ def worker(serial, apk_queue, out_path, done_sha, lock,
                 local_results.append(res)
                 counters["ok"] += 1
                 since_reset += 1
+                if res.get("frida_used", 0):
+                    counters["frida_conn"] += 1
                 if has_frida_signal(res):
                     counters["frida_ok"] += 1
             else:
                 counters["fail"] += 1
             pbar.set_postfix_str(
-                "Frida:{frida_ok} OK:{ok} F:{fail} [{s}]".format(
+                "Conn:{frida_conn} Sig:{frida_ok} OK:{ok} F:{fail} [{s}]".format(
                     s=serial[-4:], **counters)
             )
             pbar.update(1)
@@ -898,14 +928,15 @@ def main():
     for i, (serial, chunk) in enumerate(zip(serials, chunks)):
         print(f"  {serial}: {len(chunk)} APK")
 
-    # SELinux permissive (tüm emülatörler)
+    # SELinux permissive + frida-server başlat + port forward kur
     if not args.no_frida:
         for serial in serials:
             ensure_selinux_permissive(serial)
+            restart_frida_server(serial)
 
     # Paylaşılan state
     lock     = threading.Lock()
-    counters = {"ok": 0, "fail": 0, "frida_ok": frida_ok_existing}
+    counters = {"ok": 0, "fail": 0, "frida_ok": frida_ok_existing, "frida_conn": 0}
     pbar     = tqdm(total=len(remaining), desc="Toplam ilerleme")
 
     # Thread'leri başlat
@@ -928,7 +959,7 @@ def main():
     pbar.close()
 
     total_now = len(pd.read_parquet(out_path)) if out_path.exists() else 0
-    print(f"\nBaşarılı: {counters['ok']} | Frida sinyalli: {counters['frida_ok']} | Başarısız: {counters['fail']}")
+    print(f"\nBaşarılı: {counters['ok']} | Frida bağlı: {counters['frida_conn']} | Frida sinyalli: {counters['frida_ok']} | Başarısız: {counters['fail']}")
     print(f"Parquet toplam: {total_now} örnek -> {out_path}")
 
 
