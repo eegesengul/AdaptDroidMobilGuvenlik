@@ -786,7 +786,7 @@ def worker(serial, apk_queue, out_path, done_sha, lock,
             )
             pbar.update(1)
 
-        if len(local_results) % 10 == 0 and local_results:
+        if local_results:
             save(local_results, out_path, lock)
             local_results = []
 
