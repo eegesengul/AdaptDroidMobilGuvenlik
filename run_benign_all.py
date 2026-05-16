@@ -222,7 +222,6 @@ def build_cmd(year: int, serials: list[str]) -> list[str]:
         "--reset-every",    "25",
         "--snapshot",       SNAPSHOT,
         "--analysis-wait",  str(ANALYSIS_WAIT),
-        "--bypass",
         "--output",         str(output_path(year)),
     ]
     kp = known_parquet_path(year)

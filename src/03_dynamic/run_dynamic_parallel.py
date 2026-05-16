@@ -435,7 +435,14 @@ def load_hook_script(use_bypass=False):
         raw = "".join(lines[3:])
     if use_bypass and BYPASS_HOOKS_JS.exists():
         bypass_src = BYPASS_HOOKS_JS.read_text(encoding="utf-8")
-        return bypass_src + "\n" + raw
+        # bypass_hooks.js eski Frida (<16) Java.* built-in API'sini kullanıyor.
+        # Frida 17'de bu global yok; frida-java-bridge bundle'dan geliyor.
+        # Bundle'dan SONRA ekle + uyumluluk shim'i: Java = frida_java_bridge_default
+        compat = (
+            "if (typeof Java === 'undefined' && typeof frida_java_bridge_default !== 'undefined') "
+            "{ globalThis.Java = frida_java_bridge_default; }\n"
+        )
+        return raw + "\n" + compat + bypass_src
     return raw
 
 
