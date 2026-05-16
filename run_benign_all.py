@@ -278,6 +278,11 @@ def run_year(year: int):
             log.info(f"  [{year}] TAMAMLANDI ({done_after}/{total} APK)")
             return
 
+        # --known-parquet modunda tüm işlenebilir APK'lar bitti ama toplam < %95
+        if rc == 0 and gained == 0 and elapsed < MIN_SANE_DURATION:
+            log.info(f"  [{year}] known-parquet APK'lari tamamlandi ({done_after}/{total} APK) — sonraki yila geciliyor")
+            return
+
         if rc == 0 and done_after < total * 0.95:
             log.warning(
                 f"  [{year}] exit 0 ama sadece {done_after}/{total} APK "
