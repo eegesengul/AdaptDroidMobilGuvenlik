@@ -346,6 +346,33 @@ def collect_logcat(serial, log_path):
         f.write(out)
 
 
+def start_logcat_stream(serial, log_path):
+    """Analiz süresince logcat'i dosyaya stream eder — buffer taşmasını önler."""
+    try:
+        f = open(log_path, "w", encoding="utf-8", errors="ignore")
+        proc = subprocess.Popen(
+            ["adb", "-s", serial, "logcat", "-v", "time"],
+            stdout=f, stderr=subprocess.DEVNULL,
+        )
+        return proc, f
+    except Exception:
+        return None, None
+
+
+def stop_logcat_stream(proc, fh):
+    try:
+        if proc:
+            proc.terminate()
+            proc.wait(timeout=5)
+    except Exception:
+        pass
+    try:
+        if fh:
+            fh.close()
+    except Exception:
+        pass
+
+
 def force_stop(serial, package):
     adb(serial, "shell", "am", "force-stop", package)
 
@@ -636,6 +663,8 @@ def analyze_apk(serial, sha256, apk_path, use_frida=True, use_bypass=False, anal
         adb(serial, "logcat", "-c")
         time.sleep(1)
 
+        logcat_proc, logcat_fh = start_logcat_stream(serial, log_path)
+
         frida_events = []
         monkey_proc = None
         if use_frida:
@@ -674,7 +703,7 @@ def analyze_apk(serial, sha256, apk_path, use_frida=True, use_bypass=False, anal
                 pass
         adb(serial, "shell", "pkill -f monkey", timeout=5)
 
-        collect_logcat(serial, log_path)
+        stop_logcat_stream(logcat_proc, logcat_fh)
         force_stop(serial, package)
 
         if frida_session:
