@@ -531,8 +531,8 @@ def parse_logcat(log_path):
         "location_access_count":  len(re.findall(r"getLastKnownLocation|requestLocationUpdates|LocationManager", log)),
         "clipboard_access_count": len(re.findall(r"ClipboardManager|getPrimaryClip", log)),
         "device_admin_count":     len(re.findall(r"DevicePolicyManager|isAdminActive|BIND_DEVICE_ADMIN", log)),
-        "wakelock_count":         len(re.findall(r"acquireWakeLock|PARTIAL_WAKE_LOCK|WakeLock", log)),
-        "exception_count":        len(re.findall(r"Exception|FATAL|ANR", log)),
+        "wakelock_count":         len(re.findall(r"acquireWakeLock|PARTIAL_WAKE_LOCK", log)),
+        "exception_count":        len(re.findall(r"FATAL EXCEPTION|AndroidRuntime.*Exception|ANR in", log)),
     }
 
 
@@ -609,6 +609,8 @@ def analyze_apk(serial, sha256, apk_path, use_frida=True, use_bypass=False, anal
                 launch_app(serial, package)
                 monkey_proc = run_monkey(serial, package)
             else:
+                # Java.perform() hook'larının kurulması için bekle (spawn → resume → ART init → hooks ready)
+                time.sleep(3)
                 monkey_proc = run_monkey(serial, package)
         else:
             launch_app(serial, package)
