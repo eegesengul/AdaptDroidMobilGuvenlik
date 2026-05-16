@@ -117,19 +117,29 @@ def start_all_emulators() -> list[str]:
         start_emulator(avd)
         time.sleep(3)          # port catismasini onlemek icin
     time.sleep(8)
-    serials = wait_for_online(timeout=360)
+    serials = wait_for_online(timeout=600)
     if not serials:
         log.error("  Hic emulator online olmadi!")
     return serials
 
 
 def ensure_all_emulators() -> list[str]:
-    """Online emulator sayisi yetersizse eksikleri baslatir."""
-    serials = [s for s in online_serials()
-               if _adb("-s", s, "shell", "getprop", "sys.boot_completed").strip() == "1"]
-    if len(serials) >= NUM_EMULATORS:
-        return serials[:NUM_EMULATORS]
-    log.warning(f"  {len(serials)}/{NUM_EMULATORS} emulator online — eksikler baslatiliyor...")
+    """Online emulator sayisi yetersizse eksikleri baslatir.
+    Bekleme: offline (henuz boot etmis) emulatorler varsa onlari oldurmeden bekle.
+    """
+    booted = [s for s in online_serials()
+              if _adb("-s", s, "shell", "getprop", "sys.boot_completed").strip() == "1"]
+    if len(booted) >= NUM_EMULATORS:
+        return booted[:NUM_EMULATORS]
+    # ADB'de gorunen (offline dahil) emulator sayisi yeterli mi? Boot bitene kadar bekle.
+    all_visible = [l.split()[0] for l in _adb("devices").splitlines()
+                   if len(l.split()) >= 1 and l.split()[0].startswith("emulator-")]
+    if len(all_visible) >= NUM_EMULATORS and len(booted) < NUM_EMULATORS:
+        log.info(f"  {len(all_visible)} emulator gorunuyor ama sadece {len(booted)} hazir — boot bekleniyor (120s)...")
+        serials = wait_for_online(timeout=120)
+        if len(serials) >= NUM_EMULATORS:
+            return serials[:NUM_EMULATORS]
+    log.warning(f"  {len(booted)}/{NUM_EMULATORS} emulator online — eksikler baslatiliyor...")
     return start_all_emulators()
 
 
