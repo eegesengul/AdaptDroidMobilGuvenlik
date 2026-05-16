@@ -229,7 +229,7 @@ def build_cmd(year: int, serials: list[str]) -> list[str]:
         "--year",           str(year),
         "--benign",
         "--devices",        *serials,
-        "--reset-every",    "25",
+        "--reset-every",    "10",
         "--snapshot",       SNAPSHOT,
         "--analysis-wait",  str(ANALYSIS_WAIT),
         "--output",         str(output_path(year)),
