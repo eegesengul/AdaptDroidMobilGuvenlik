@@ -669,6 +669,9 @@ def analyze_apk(serial, sha256, apk_path, use_frida=True, use_bypass=False, anal
         monkey_proc = None
         if use_frida:
             frida_session, frida_script, frida_events, _ = frida_spawn(serial, package, use_bypass=use_bypass)
+            if frida_session is None and use_bypass:
+                # bypass başarısız → bypass'sız tekrar dene (frida_hooks.js çalışsın)
+                frida_session, frida_script, frida_events, _ = frida_spawn(serial, package, use_bypass=False)
             if frida_session is None:
                 launch_app(serial, package)
                 monkey_proc = run_monkey(serial, package)
