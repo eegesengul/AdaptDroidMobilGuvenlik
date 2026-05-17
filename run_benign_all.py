@@ -146,9 +146,9 @@ def ensure_all_emulators() -> list[str]:
 def start_frida_server(serial: str):
     _adb("-s", serial, "shell", "pkill -f frida-server", timeout=5)
     time.sleep(2)
-    _adb("-s", serial, "shell", f"su 0 nohup {FRIDA_SERVER} &>/dev/null &", timeout=5)
+    _adb("-s", serial, "shell", f"su 0 nohup {FRIDA_SERVER} >/dev/null 2>&1 &", timeout=5)
     time.sleep(4)
-    out = _adb("-s", serial, "shell", "ps 2>/dev/null | grep frida-server", timeout=5)
+    out = _adb("-s", serial, "shell", "ps -A 2>/dev/null | grep frida-server", timeout=5)
     if "frida-server" in out:
         log.info(f"  [{serial}] frida-server calisiyor.")
     else:
