@@ -25,18 +25,19 @@ from xgboost import XGBClassifier
 import warnings
 warnings.filterwarnings("ignore")
 
-RANDOM_STATE = 42
-TEST_SIZE    = 0.20
-FEATURES     = Path(r"C:\Users\berat\Desktop\features")
-SKIP_DIRS    = {"2019_eski", "2017-3.8", "2017-eski", "2021-eski", "2023_ege"}
-SONUCLAR_DIR = Path(__file__).parent / "sonuclar"
+RANDOM_STATE     = 42
+TEST_SIZE        = 0.20
+FEATURES_STATIC  = Path(__file__).parents[2] / "data" / "features_final_training"
+FEATURES_DYNAMIC = Path(__file__).parents[2] / "data" / "features"
+SKIP_DIRS        = {"2019_eski", "2017-3.8", "2017-eski", "2021-eski", "2023_ege"}
+SONUCLAR_DIR     = Path(__file__).parent / "sonuclar"
 
 # ── Veri yukleme ──────────────────────────────────────────────
 
 def load_static(label: int) -> pd.DataFrame:
     folder = "static_features_malware" if label == 1 else "static_features_benign"
     frames = []
-    for year_dir in sorted((FEATURES / folder).iterdir()):
+    for year_dir in sorted((FEATURES_STATIC / folder).iterdir()):
         if not year_dir.is_dir() or year_dir.name in SKIP_DIRS:
             continue
         f = year_dir / "static_features.parquet"
@@ -51,13 +52,14 @@ def load_static(label: int) -> pd.DataFrame:
 def load_dynamic(label: int) -> pd.DataFrame:
     folder = "dynamic_features_malware" if label == 1 else "dynamic_features_benign"
     frames = []
-    for year_dir in sorted((FEATURES / folder).iterdir()):
+    for year_dir in sorted((FEATURES_DYNAMIC / folder).iterdir()):
         if not year_dir.is_dir() or year_dir.name in SKIP_DIRS:
             continue
-        parquets = list(year_dir.glob("*.parquet"))
-        if not parquets:
+        v2 = year_dir / "dynamic_features_5min_v2.parquet"
+        f  = v2 if v2.exists() else year_dir / "dynamic_features_5min.parquet"
+        if not f.exists():
             continue
-        df = pd.read_parquet(parquets[0])
+        df = pd.read_parquet(f)
         df["label"] = label
         df["year"]  = int(year_dir.name[:4])
         frames.append(df)

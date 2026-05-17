@@ -13526,54 +13526,62 @@ frida_java_bridge_default.perform(() => {
 
   try {
     const Cipher = frida_java_bridge_default.use("javax.crypto.Cipher");
-    Cipher.getInstance.overload("java.lang.String").implementation = function(algo) {
-      send({ type: "crypto_cipher", algorithm: algo });
-      return this.getInstance(algo);
-    };
+    Cipher.getInstance.overloads.forEach(function(ov) {
+      ov.implementation = function() {
+        try { send({ type: "crypto_cipher", algorithm: arguments[0] ? arguments[0].toString() : "" }); } catch(_e) {}
+        return ov.apply(this, arguments);
+      };
+    });
   } catch (_e) {}
 
   try {
     const MessageDigest = frida_java_bridge_default.use("java.security.MessageDigest");
-    MessageDigest.getInstance.overload("java.lang.String").implementation = function(algo) {
-      send({ type: "crypto_digest", algorithm: algo });
-      return this.getInstance(algo);
-    };
+    MessageDigest.getInstance.overloads.forEach(function(ov) {
+      ov.implementation = function() {
+        try { send({ type: "crypto_digest", algorithm: arguments[0] ? arguments[0].toString() : "" }); } catch(_e) {}
+        return ov.apply(this, arguments);
+      };
+    });
   } catch (_e) {}
 
   try {
     const Base64 = frida_java_bridge_default.use("android.util.Base64");
-    Base64.encodeToString.overload("[B", "int").implementation = function(input, flags) {
-      send({ type: "base64_encode" });
-      return this.encodeToString(input, flags);
-    };
+    Base64.encodeToString.overloads.forEach(function(ov) {
+      ov.implementation = function() {
+        try { send({ type: "base64_encode" }); } catch(_e) {}
+        return ov.apply(this, arguments);
+      };
+    });
+    Base64.encode.overloads.forEach(function(ov) {
+      ov.implementation = function() {
+        try { send({ type: "base64_encode" }); } catch(_e) {}
+        return ov.apply(this, arguments);
+      };
+    });
   } catch (_e) {}
 
   try {
     const Socket = frida_java_bridge_default.use("java.net.Socket");
-    Socket.$init.overload("java.lang.String", "int").implementation = function(host, port) {
-      send({ type: "network_socket", host: host, port: port });
-      return this.$init(host, port);
-    };
+    Socket.$init.overloads.forEach(function(ov) {
+      ov.implementation = function() {
+        try {
+          var host = arguments[0] ? arguments[0].toString() : "";
+          var port = arguments[1] ? parseInt(arguments[1]) : 0;
+          if (host && host.indexOf(".") !== -1) send({ type: "network_socket", host: host, port: port });
+        } catch(_e) {}
+        return ov.apply(this, arguments);
+      };
+    });
   } catch (_e) {}
 
   try {
     const URL = frida_java_bridge_default.use("java.net.URL");
-    URL.openConnection.overload().implementation = function() {
-      send({ type: "network_http", url: this.toString() });
-      return this.openConnection();
-    };
-  } catch (_e) {}
-
-  try {
-    const Runtime2 = frida_java_bridge_default.use("java.lang.Runtime");
-    Runtime2.exec.overload("java.lang.String").implementation = function(cmd) {
-      send({ type: "runtime_exec", command: cmd });
-      return this.exec(cmd);
-    };
-    Runtime2.exec.overload("[Ljava.lang.String;").implementation = function(cmds) {
-      send({ type: "runtime_exec", command: cmds.join(" ") });
-      return this.exec(cmds);
-    };
+    URL.openConnection.overloads.forEach(function(ov) {
+      ov.implementation = function() {
+        try { send({ type: "network_http", url: this.toString() }); } catch(_e) {}
+        return ov.apply(this, arguments);
+      };
+    });
   } catch (_e) {}
 
   try {
