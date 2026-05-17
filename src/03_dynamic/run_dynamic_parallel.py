@@ -24,8 +24,11 @@ import time
 from pathlib import Path
 
 if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 sys.path.insert(0, str(Path(__file__).parents[2]))
 
@@ -34,7 +37,7 @@ from tqdm import tqdm
 
 from config import DYNAMIC_LOGS_DIR, FEATURES_DIR
 
-MONKEY_EVENTS   = 1000
+MONKEY_EVENTS   = 1600
 MONKEY_THROTTLE = 150
 KEEPER_INTERVAL = 4   # saniyede bir foreground kontrolü
 ANALYSIS_WAIT   = 60

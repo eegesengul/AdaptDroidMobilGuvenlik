@@ -13709,4 +13709,156 @@ frida_java_bridge_default.perform(() => {
       return this.getInstalledPackages(flags);
     };
   } catch (_e) {}
+
+  // ── reflection_invoke — Method.invoke, rate-limited 3s ──────────────────
+  try {
+    var _reflInvokeLastSent = 0;
+    const Method = frida_java_bridge_default.use("java.lang.reflect.Method");
+    Method.invoke.overload("java.lang.Object", "[Ljava.lang.Object;").implementation = function(obj, args) {
+      var now = Date.now();
+      if (now - _reflInvokeLastSent > 3000) {
+        _reflInvokeLastSent = now;
+        send({ type: "reflection_invoke" });
+      }
+      return this.invoke(obj, args);
+    };
+  } catch (_e) {}
+
+  // ── camera_open — eski Camera API + camera2 API ──────────────────────────
+  try {
+    const Camera = frida_java_bridge_default.use("android.hardware.Camera");
+    Camera.open.overloads.forEach(function(ov) {
+      ov.implementation = function() { send({ type: "camera_open" }); return ov.apply(this, arguments); };
+    });
+  } catch (_e) {}
+  try {
+    const CameraManager = frida_java_bridge_default.use("android.hardware.camera2.CameraManager");
+    CameraManager.openCamera.overloads.forEach(function(ov) {
+      ov.implementation = function() { send({ type: "camera_open" }); return ov.apply(this, arguments); };
+    });
+  } catch (_e) {}
+
+  // ── location_request — LocationManager tum overload + FusedLocation ──────
+  try {
+    const LocationManager = frida_java_bridge_default.use("android.location.LocationManager");
+    LocationManager.requestLocationUpdates.overloads.forEach(function(ov) {
+      ov.implementation = function() { send({ type: "location_request" }); return ov.apply(this, arguments); };
+    });
+    LocationManager.requestSingleUpdate.overloads.forEach(function(ov) {
+      ov.implementation = function() { send({ type: "location_request" }); return ov.apply(this, arguments); };
+    });
+    LocationManager.getLastKnownLocation.overloads.forEach(function(ov) {
+      ov.implementation = function() { send({ type: "location_request" }); return ov.apply(this, arguments); };
+    });
+  } catch (_e) {}
+  try {
+    const FusedLocation = frida_java_bridge_default.use("com.google.android.gms.location.FusedLocationProviderClient");
+    FusedLocation.requestLocationUpdates.overloads.forEach(function(ov) {
+      ov.implementation = function() { send({ type: "location_request" }); return ov.apply(this, arguments); };
+    });
+    FusedLocation.getLastLocation.overloads.forEach(function(ov) {
+      ov.implementation = function() { send({ type: "location_request" }); return ov.apply(this, arguments); };
+    });
+  } catch (_e) {}
+
+  // ── network_socket — native connect() + Java Socket.connect() ────────────
+  // Native seviye: OkHttp / Retrofit / JNI dahil HER baglanti yakalanir
+  try {
+    var _nativeSockLast = 0;
+    const connectPtr = Module.findExportByName("libc.so", "connect");
+    if (connectPtr) {
+      Interceptor.attach(connectPtr, {
+        onEnter: function(args) {
+          var now = Date.now();
+          if (now - _nativeSockLast > 500) {
+            _nativeSockLast = now;
+            send({ type: "network_socket", host: "native", port: 0 });
+          }
+        }
+      });
+    }
+  } catch (_e) {}
+  // Java fallback: Socket.connect() tum overload'lari
+  try {
+    const Socket2 = frida_java_bridge_default.use("java.net.Socket");
+    Socket2.connect.overloads.forEach(function(ov) {
+      ov.implementation = function() {
+        send({ type: "network_socket", host: arguments[0] ? arguments[0].toString() : "", port: 0 });
+        return ov.apply(this, arguments);
+      };
+    });
+  } catch (_e) {}
+
+  // ── runtime_exec — native execve() + Java Runtime/ProcessBuilder ─────────
+  // Native seviye: JNI uzerinden dogrudan execve cagrisini da yakalar
+  try {
+    var _nativeExecLast = 0;
+    const execvePtr = Module.findExportByName("libc.so", "execve");
+    if (execvePtr) {
+      Interceptor.attach(execvePtr, {
+        onEnter: function(args) {
+          var now = Date.now();
+          if (now - _nativeExecLast > 500) {
+            _nativeExecLast = now;
+            try { send({ type: "runtime_exec", command: args[0].readUtf8String() }); }
+            catch(_e) { send({ type: "runtime_exec", command: "native_execve" }); }
+          }
+        }
+      });
+    }
+  } catch (_e) {}
+  // Java: Runtime.exec tum overload'lari
+  try {
+    const Runtime2 = frida_java_bridge_default.use("java.lang.Runtime");
+    Runtime2.exec.overloads.forEach(function(ov) {
+      ov.implementation = function() {
+        try { send({ type: "runtime_exec", command: arguments[0] ? arguments[0].toString() : "" }); }
+        catch(_e) { send({ type: "runtime_exec", command: "runtime_exec" }); }
+        return ov.apply(this, arguments);
+      };
+    });
+  } catch (_e) {}
+  // Java: ProcessBuilder.start
+  try {
+    const PB = frida_java_bridge_default.use("java.lang.ProcessBuilder");
+    PB.start.implementation = function() {
+      try { send({ type: "runtime_exec", command: this.command().toString() }); }
+      catch(_e) { send({ type: "runtime_exec", command: "processbuilder" }); }
+      return this.start();
+    };
+  } catch (_e) {}
+
+  // ── contact_query / sms_read / call_log_read — ContentResolver TUM overload
+  try {
+    const CR = frida_java_bridge_default.use("android.content.ContentResolver");
+    function _crDispatch(uriStr) {
+      if (uriStr.indexOf("contacts") !== -1 || uriStr.indexOf("phone") !== -1) {
+        send({ type: "contact_query", uri: uriStr });
+      } else if (uriStr.indexOf("sms") !== -1 || uriStr.indexOf("mms") !== -1) {
+        send({ type: "sms_read", uri: uriStr });
+      } else if (uriStr.indexOf("call_log") !== -1 || uriStr.indexOf("calls") !== -1) {
+        send({ type: "call_log_read", uri: uriStr });
+      }
+    }
+    CR.query.overloads.forEach(function(ov) {
+      ov.implementation = function() {
+        try { _crDispatch(arguments[0] ? arguments[0].toString() : ""); } catch(_e) {}
+        return ov.apply(this, arguments);
+      };
+    });
+    // insert / update / delete uzerinden de SMS yazma gibi islemleri yakala
+    CR.insert.overloads.forEach(function(ov) {
+      ov.implementation = function() {
+        try {
+          var uriStr = arguments[0] ? arguments[0].toString() : "";
+          if (uriStr.indexOf("sms") !== -1 || uriStr.indexOf("mms") !== -1) {
+            send({ type: "sms_send", destination: uriStr });
+          } else if (uriStr.indexOf("contacts") !== -1) {
+            send({ type: "contact_query", uri: uriStr });
+          }
+        } catch(_e) {}
+        return ov.apply(this, arguments);
+      };
+    });
+  } catch (_e) {}
 });
