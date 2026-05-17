@@ -244,7 +244,7 @@ def push_frida(serial: str, binary: Path):
     log.info(f"  [{serial}] frida-server push ediliyor...")
     adb("-s", serial, "push", str(binary), FRIDA_DEVICE, timeout=60)
     adb("-s", serial, "shell", f"su 0 chmod 755 {FRIDA_DEVICE}", timeout=10)
-    adb("-s", serial, "shell", f"su 0 nohup {FRIDA_DEVICE} &>/dev/null &", timeout=5)
+    adb("-s", serial, "shell", f"su 0 nohup {FRIDA_DEVICE} >/dev/null 2>&1 &", timeout=5)
     time.sleep(4)
     out = adb("-s", serial, "shell", "ps 2>/dev/null | grep frida-server", timeout=5)
     if "frida-server" in out:
@@ -292,7 +292,7 @@ def setup_emulators(emu: Path, frida_binary: Path) -> list[str]:
         for avd in AVD_NAMES:
             log.info(f"  Emulator baslatiliyor: {avd}")
             subprocess.Popen(
-                [str(emu), "-avd", avd, "-no-audio", "-no-window", "-no-snapshot-load"],
+                [str(emu), "-avd", avd, "-no-audio", "-no-window", "-no-snapshot-load", "-no-snapshot-save"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             time.sleep(4)   # port catismasini onle

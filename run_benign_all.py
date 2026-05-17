@@ -103,7 +103,7 @@ def start_emulator(avd_name: str):
         return
     log.info(f"  Emulator baslatiliyor: {avd_name}")
     subprocess.Popen(
-        [str(SDK_EMU), "-avd", avd_name, "-no-audio", "-no-window", "-no-snapshot-load"],
+        [str(SDK_EMU), "-avd", avd_name, "-no-audio", "-no-window", "-no-snapshot-load", "-no-snapshot-save"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
