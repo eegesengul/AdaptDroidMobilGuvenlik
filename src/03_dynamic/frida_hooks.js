@@ -13546,18 +13546,10 @@ frida_java_bridge_default.perform(() => {
 
   try {
     const Base64 = frida_java_bridge_default.use("android.util.Base64");
-    Base64.encodeToString.overloads.forEach(function(ov) {
-      ov.implementation = function() {
-        try { send({ type: "base64_encode" }); } catch(_e) {}
-        return ov.apply(this, arguments);
-      };
-    });
-    Base64.encode.overloads.forEach(function(ov) {
-      ov.implementation = function() {
-        try { send({ type: "base64_encode" }); } catch(_e) {}
-        return ov.apply(this, arguments);
-      };
-    });
+    Base64.encodeToString.overload("[B", "int").implementation = function(input, flags) {
+      send({ type: "base64_encode" });
+      return this.encodeToString(input, flags);
+    };
   } catch (_e) {}
 
   try {
