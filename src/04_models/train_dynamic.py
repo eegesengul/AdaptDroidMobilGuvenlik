@@ -1,8 +1,3 @@
-﻿"""
-Dinamik feature'larla LightGBM modeli eğitir.
-Kullanım:
-    python train_dynamic.py
-"""
 import sys
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parents[2]))
 
@@ -16,17 +11,14 @@ from config import (
     METADATA_CSV, DYNAMIC_PARQUET, MODELS_DIR, LGBM_PARAMS
 )
 
-
 def load_data():
     meta  = pd.read_csv(METADATA_CSV)[["sha256", "label", "split"]]
     feats = pd.read_parquet(DYNAMIC_PARQUET)
     df    = feats.merge(meta, on="sha256", how="inner")
     return df
 
-
 def get_feature_cols(df: pd.DataFrame) -> list:
     return [c for c in df.columns if c not in ("sha256", "label", "split")]
-
 
 def train_and_evaluate(df: pd.DataFrame):
     feat_cols = get_feature_cols(df)
@@ -63,7 +55,6 @@ def train_and_evaluate(df: pd.DataFrame):
 
     return model, feat_cols
 
-
 def main():
     print("Veri yükleniyor...")
     df = load_data()
@@ -75,7 +66,6 @@ def main():
     out_path = MODELS_DIR / "dynamic_model.pkl"
     joblib.dump({"model": model, "feature_cols": feat_cols}, out_path)
     print(f"\nModel kaydedildi -> {out_path}")
-
 
 if __name__ == "__main__":
     main()

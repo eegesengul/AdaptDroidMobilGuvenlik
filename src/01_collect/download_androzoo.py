@@ -1,8 +1,3 @@
-"""
-AndroZoo'dan yıl bazlı APK indirme scripti.
-Kullanım:
-    python download_androzoo.py --index androzoo_latest.csv.gz
-"""
 import argparse
 import os
 import sys
@@ -19,9 +14,8 @@ from config import (
 )
 
 ANDROZOO_BASE = "https://androzoo.uni.lu/api/download"
-MALWARE_MIN_DETECTIONS = 4   # VirusTotal en az 4 engine tespit
-BENIGN_MAX_DETECTIONS  = 0   # VirusTotal hiç tespit etmemiş
-
+MALWARE_MIN_DETECTIONS = 4
+BENIGN_MAX_DETECTIONS  = 0
 
 def download_apk(sha256: str, dest_path: str, api_key: str) -> bool:
     if os.path.exists(dest_path):
@@ -42,7 +36,6 @@ def download_apk(sha256: str, dest_path: str, api_key: str) -> bool:
     except Exception:
         return False
 
-
 def load_index(index_path: str) -> pd.DataFrame:
     print(f"Index yükleniyor: {index_path}")
     df = pd.read_csv(index_path, low_memory=False)
@@ -53,7 +46,6 @@ def load_index(index_path: str) -> pd.DataFrame:
     print(f"Toplam kayıt: {len(df):,}")
     return df
 
-
 def download_for_year(df: pd.DataFrame, year: int, label: int, count: int, api_key: str):
     dest_root = MALWARE_DIR / str(year) if label == 1 else BENIGN_DIR / str(year)
     dest_root.mkdir(parents=True, exist_ok=True)
@@ -63,7 +55,6 @@ def download_for_year(df: pd.DataFrame, year: int, label: int, count: int, api_k
     else:
         pool = df[(df.year == year) & (df.vt_detection <= BENIGN_MAX_DETECTIONS)]
 
-    # Zaten indirilenler
     already = {f.stem for f in dest_root.glob("*.apk")}
     pool = pool[~pool.sha256.isin(already)]
 
@@ -83,7 +74,6 @@ def download_for_year(df: pd.DataFrame, year: int, label: int, count: int, api_k
         time.sleep(0.1)
 
     print(f"  [{year}] {'malware' if label==1 else 'benign'}: {ok} indirildi, {fail} hata")
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -111,7 +101,6 @@ def main():
             download_for_year(df, year, label=0, count=ben_count, api_key=ANDROZOO_API_KEY)
 
     print("\nTamamlandı.")
-
 
 if __name__ == "__main__":
     main()

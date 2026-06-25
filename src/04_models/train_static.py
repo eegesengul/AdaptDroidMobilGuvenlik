@@ -1,8 +1,3 @@
-﻿"""
-Statik feature'larla LightGBM modeli eğitir.
-Kullanım:
-    python train_static.py
-"""
 import sys
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parents[2]))
 
@@ -19,17 +14,14 @@ from config import (
     METADATA_CSV, STATIC_PARQUET, MODELS_DIR, LGBM_PARAMS, SPLITS
 )
 
-
 def load_data():
     meta  = pd.read_csv(METADATA_CSV)[["sha256", "label", "split"]]
     feats = pd.read_parquet(STATIC_PARQUET)
     df    = feats.merge(meta, on="sha256", how="inner")
     return df
 
-
 def get_feature_cols(df: pd.DataFrame) -> list:
     return [c for c in df.columns if c not in ("sha256", "label", "split")]
-
 
 def train_and_evaluate(df: pd.DataFrame):
     feat_cols = get_feature_cols(df)
@@ -58,7 +50,6 @@ def train_and_evaluate(df: pd.DataFrame):
     print(f"ROC-AUC : {roc_auc_score(y_val, y_prob):.4f}")
     print(f"F1      : {f1_score(y_val, y_pred):.4f}")
 
-    # Test setleri
     for split_name in ["test1", "test2", "test3"]:
         mask = df["split"] == split_name
         if mask.sum() == 0:
@@ -75,7 +66,6 @@ def train_and_evaluate(df: pd.DataFrame):
 
     return model, feat_cols
 
-
 def main():
     print("Veri yükleniyor...")
     df = load_data()
@@ -87,7 +77,6 @@ def main():
     model_path = MODELS_DIR / "static_model.pkl"
     joblib.dump({"model": model, "feature_cols": feat_cols}, model_path)
     print(f"\nModel kaydedildi -> {model_path}")
-
 
 if __name__ == "__main__":
     main()

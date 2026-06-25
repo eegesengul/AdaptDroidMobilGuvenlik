@@ -1,8 +1,3 @@
-﻿"""
-İndirilen tüm APK'lardan metadata.csv oluşturur.
-Kullanım:
-    python build_metadata.py
-"""
 import hashlib
 import os
 import sys
@@ -16,7 +11,6 @@ from config import (
     SPLITS, DYNAMIC_TARGETS, RANDOM_SEED
 )
 
-
 def sha256_of_file(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -24,13 +18,11 @@ def sha256_of_file(path: str) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-
 def year_to_split(year: int) -> str:
     for split_name, years in SPLITS.items():
         if year in years:
             return split_name
     return "unknown"
-
 
 def collect_apks() -> list:
     rows = []
@@ -52,29 +44,25 @@ def collect_apks() -> list:
                     "year":          year,
                     "label":         label,
                     "source":        label_str,
-                    "vt_detection":  -1,       # sonradan doldurulabilir
+                    "vt_detection":  -1,
                     "split":         year_to_split(year),
-                    "in_dynamic":    0,         # sonraki adımda işaretlenir
+                    "in_dynamic":    0,
                 })
     return rows
 
-
 def get_abi(apk_path: str) -> str:
-    """APK'nın native lib ABI'sini döner: 'none', 'compat', 'armeabi_only'.
-    Klasör adı yerine ELF magic byte ile gerçek bitness kontrol edilir."""
     import zipfile
     try:
         with zipfile.ZipFile(apk_path) as z:
             libs = [n for n in z.namelist()
                     if n.startswith("lib/") and n.endswith(".so")]
             if not libs:
-                return "none"   # saf Java veya runtime-packed — her emülatörde çalışır
+                return "none"
 
             has_64 = False
             has_32_only = False
             for lib in libs:
                 folder = lib.split("/")[1] if len(lib.split("/")) > 2 else ""
-                # Klasör adından beklenen bitness
                 if folder in ("x86_64", "arm64-v8a"):
                     expected_64 = True
                 elif folder in ("x86", "armeabi", "armeabi-v7a"):
@@ -82,13 +70,12 @@ def get_abi(apk_path: str) -> str:
                 else:
                     continue
 
-                # Gerçek ELF class byte ile doğrula (ilk 8 byte yeterli)
                 try:
-                    data = z.read(lib, )[:8]  # sadece header
+                    data = z.read(lib, )[:8]
                     if data[:4] == b'\x7fELF':
                         actual_64 = (data[4] == 2)
                     else:
-                        actual_64 = expected_64  # ELF değilse klasör adına güven
+                        actual_64 = expected_64
                 except Exception:
                     actual_64 = expected_64
 
@@ -98,17 +85,14 @@ def get_abi(apk_path: str) -> str:
                     has_32_only = True
 
             if has_64:
-                return "compat"       # 64-bit lib var — API 34'te çalışır
+                return "compat"
             if has_32_only:
-                return "armeabi_only" # sadece 32-bit — API 34'te crash
+                return "armeabi_only"
             return "none"
     except Exception:
         return "unknown"
 
-
 def assign_dynamic_subset(df: pd.DataFrame) -> pd.DataFrame:
-    """Dinamik analiz için yıl/label dengeli alt küme seç.
-    ABI uyumlu APK'ları (none/compat) önceliklendirir."""
     import random
     random.seed(RANDOM_SEED)
     df = df.copy()
@@ -120,13 +104,11 @@ def assign_dynamic_subset(df: pd.DataFrame) -> pd.DataFrame:
             if pool_df.empty or n == 0:
                 continue
 
-            # ABI kontrolü — uyumlu olanları önce al
             pool_df = pool_df.copy()
             pool_df["_abi"] = pool_df["apk_path"].apply(get_abi)
             compat = pool_df[pool_df["_abi"].isin(["none", "compat"])].index.tolist()
             other  = pool_df[pool_df["_abi"] == "armeabi_only"].index.tolist()
 
-            # Önce uyumlu havuzdan al, eksik kalırsa diğerlerinden tamamla
             chosen = random.sample(compat, min(n, len(compat)))
             if len(chosen) < n:
                 extra = random.sample(other, min(n - len(chosen), len(other)))
@@ -138,7 +120,6 @@ def assign_dynamic_subset(df: pd.DataFrame) -> pd.DataFrame:
                   f"({compat_count} uyumlu, {len(chosen)-compat_count} armeabi)")
 
     return df
-
 
 def main():
     print("APK'lar taranıyor...")
@@ -162,7 +143,6 @@ def main():
     print(f"  Dinamik  : {df.in_dynamic.sum():,}")
     print("\nYıl dağılımı:")
     print(df.groupby(["year", "label"]).size().unstack(fill_value=0).to_string())
-
 
 if __name__ == "__main__":
     main()

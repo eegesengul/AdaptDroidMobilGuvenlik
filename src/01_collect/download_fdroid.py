@@ -1,8 +1,3 @@
-﻿"""
-F-Droid'dan yıl bazlı benign APK indirme scripti.
-Kullanım:
-    python download_fdroid.py --years 2019 2020 2021
-"""
 import argparse
 import os
 import sys
@@ -18,15 +13,12 @@ from config import APK_TARGETS, BENIGN_DIR, RANDOM_SEED
 FDROID_INDEX = "https://f-droid.org/repo/index-v2.json"
 FDROID_BASE  = "https://f-droid.org/repo/"
 
-
 def fetch_index() -> dict:
     print("F-Droid index indiriliyor (~50MB)...")
     r = requests.get(FDROID_INDEX, timeout=120)
     return r.json()
 
-
 def collect_candidates(index: dict, target_years: list) -> dict:
-    """Yıl -> APK URL listesi döner."""
     candidates = {y: [] for y in target_years}
 
     for pkg_name, pkg_data in index.get("packages", {}).items():
@@ -49,7 +41,6 @@ def collect_candidates(index: dict, target_years: list) -> dict:
             })
     return candidates
 
-
 def download_apk(url: str, dest_path: str) -> bool:
     if os.path.exists(dest_path):
         return True
@@ -63,7 +54,6 @@ def download_apk(url: str, dest_path: str) -> bool:
         return True
     except Exception:
         return False
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -93,7 +83,6 @@ def main():
         print(f"\n── {year}: {remaining} benign APK indirilecek ──")
         ok, fail = 0, 0
         for item in tqdm(pool[:remaining], desc=f"F-Droid {year}"):
-            # dosya adını sha-benzeri yap (paket adı + ver)
             safe_name = item["pkg"].replace(".", "_") + ".apk"
             dest = str(dest_dir / safe_name)
             if download_apk(item["url"], dest):
@@ -105,7 +94,6 @@ def main():
         print(f"  [{year}] benign: {ok} indirildi, {fail} hata")
 
     print("\nTamamlandı.")
-
 
 if __name__ == "__main__":
     main()

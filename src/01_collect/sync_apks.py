@@ -1,18 +1,3 @@
-"""
-İki bilgisayar arasında APK koleksiyonunu senkronize eder.
-
-Kullanım:
-    # Bu bilgisayarda: mevcut APK listesini dışa aktar
-    python sync_apks.py --export
-
-    # Diğer bilgisayarda: eksik APK'ları indir
-    python sync_apks.py --sync --manifest apk_manifest.txt
-
-    # Ne indirileceğini görmek için (indirmeden):
-    python sync_apks.py --sync --dry-run
-
-Benign APK'lar F-Droid'dan, malware APK'lar AndroZoo'dan indirilir.
-"""
 import argparse
 import sys
 import time
@@ -28,17 +13,12 @@ from config import ANDROZOO_API_KEY, APK_DIR
 FDROID_BASE   = "https://f-droid.org/repo/"
 ANDROZOO_BASE = "https://androzoo.uni.lu/api/download"
 
-
-# ── Yardımcılar ────────────────────────────────────────────
-
 def scan_local_apks() -> list:
-    """data/apks/ altındaki tüm APK'ları relative path olarak döner."""
     entries = []
     for apk in sorted(APK_DIR.rglob("*.apk")):
-        rel = apk.relative_to(APK_DIR)   # orn: malware/2017/ABCD.apk
+        rel = apk.relative_to(APK_DIR)
         entries.append(str(rel).replace("\\", "/"))
     return entries
-
 
 def download_file(url, dest, params=None):
     if dest.exists():
@@ -60,22 +40,15 @@ def download_file(url, dest, params=None):
             tmp.unlink()
         return False
 
-
 def download_benign(filename, dest):
-    """F-Droid'dan benign APK indir. URL doğrudan dosya adından kurulur."""
     return download_file(FDROID_BASE + filename, dest)
 
-
 def download_malware(sha256, dest):
-    """AndroZoo'dan SHA256 ile malware APK indir."""
     if not ANDROZOO_API_KEY or ANDROZOO_API_KEY == "ANDROZOO_KEY_BURAYA":
         print("    HATA: ANDROZOO_API_KEY .env dosyasında tanımlı değil.")
         return False
     return download_file(ANDROZOO_BASE, dest,
                          params={"apikey": ANDROZOO_API_KEY, "sha256": sha256})
-
-
-# ── Export ─────────────────────────────────────────────────
 
 def cmd_export(out_path, label_filter=None):
     entries = scan_local_apks()
@@ -95,9 +68,6 @@ def cmd_export(out_path, label_filter=None):
         print(f"  {k}: {v:,}")
     print(f"\nBu dosyayı diğer bilgisayara kopyala, sonra:\n"
           f"  python src/01_collect/sync_apks.py --sync --manifest {out_path.name}")
-
-
-# ── Sync ───────────────────────────────────────────────────
 
 def cmd_sync(manifest_path, dry_run=False, label_filter=None):
     if not manifest_path.exists():
@@ -129,7 +99,7 @@ def cmd_sync(manifest_path, dry_run=False, label_filter=None):
     ok = fail = skip = 0
     with tqdm(missing, desc="İndiriliyor") as bar:
         for rel_path in bar:
-            parts = rel_path.split("/")   # [label, year, filename]
+            parts = rel_path.split("/")
             if len(parts) != 3:
                 skip += 1
                 continue
@@ -157,9 +127,6 @@ def cmd_sync(manifest_path, dry_run=False, label_filter=None):
     if fail:
         print("Hatalı dosyalar için tekrar çalıştır, mevcutlar otomatik atlanır.")
 
-
-# ── CLI ────────────────────────────────────────────────────
-
 def main():
     parser = argparse.ArgumentParser(description="APK koleksiyonu senkronizasyonu")
     parser.add_argument("--export",   action="store_true", help="Bu bilgisayardaki APK listesini dışa aktar")
@@ -177,7 +144,6 @@ def main():
         cmd_sync(Path(args.manifest), dry_run=args.dry_run, label_filter=args.label)
     else:
         parser.print_help()
-
 
 if __name__ == "__main__":
     main()

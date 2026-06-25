@@ -1,12 +1,3 @@
-﻿"""
-SHAP Explainability Analizi
-- Hangi feature'lar en önemli?
-- Yıllara göre feature önemi nasıl değişiyor? (drift yorumu)
-- Malware davranış evrimi
-
-Kullanım:
-    python shap_analysis.py
-"""
 import sys
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parents[2]))
 
@@ -21,9 +12,8 @@ from config import (
     MODELS_DIR, FIGURES_DIR, TABLES_DIR, RANDOM_SEED
 )
 
-ANALYSIS_YEARS = [2019, 2021, 2023, 2025]   # karşılaştırılacak yıllar
+ANALYSIS_YEARS = [2019, 2021, 2023, 2025]
 TOP_N_FEATURES = 20
-
 
 def main():
     static_obj = joblib.load(MODELS_DIR / "static_model.pkl")
@@ -40,14 +30,13 @@ def main():
 
     explainer = shap.TreeExplainer(model)
 
-    # ── 1. Genel SHAP özet grafiği (tüm veri) ─────────────
     X_all = df[common_cols].fillna(0)
     sample_idx = X_all.sample(min(2000, len(X_all)), random_state=RANDOM_SEED).index
     X_sample   = X_all.loc[sample_idx]
     shap_vals  = explainer.shap_values(X_sample)
 
     if isinstance(shap_vals, list):
-        shap_vals = shap_vals[1]   # malware sınıfı
+        shap_vals = shap_vals[1]
 
     fig, ax = plt.subplots(figsize=(10, 8))
     shap.summary_plot(shap_vals, X_sample, plot_type="bar",
@@ -58,7 +47,6 @@ def main():
     plt.close()
     print(f"Genel SHAP -> {FIGURES_DIR / 'shap_global.png'}")
 
-    # ── 2. Yıl bazlı SHAP (drift görselleştirmesi) ────────
     yearly_importance = {}
 
     for year in ANALYSIS_YEARS:
@@ -73,7 +61,6 @@ def main():
         importance = pd.Series(mean_abs, index=common_cols)
         yearly_importance[year] = importance
 
-        # Bireysel yıl grafiği
         fig, ax = plt.subplots(figsize=(10, 7))
         shap.summary_plot(sv, X_year, plot_type="bar",
                           max_display=TOP_N_FEATURES, show=False)
@@ -83,9 +70,7 @@ def main():
         plt.close()
         print(f"  [{year}] SHAP -> {FIGURES_DIR / f'shap_{year}.png'}")
 
-    # ── 3. Yıllara göre top feature'ların önemi değişimi ──
     if len(yearly_importance) >= 2:
-        # En önemli genel top-10 feature seç
         overall   = pd.concat(yearly_importance.values(), axis=1).mean(axis=1)
         top10     = overall.nlargest(10).index.tolist()
         heat_data = pd.DataFrame(
@@ -106,10 +91,8 @@ def main():
         plt.close()
         print(f"Drift heatmap -> {FIGURES_DIR / 'shap_drift_heatmap.png'}")
 
-        # Tablo kaydet
         heat_data.to_csv(TABLES_DIR / "shap_yearly_importance.csv")
 
-    # ── 4. Beeswarm (detaylı etki yönü) ───────────────────
     X_all2  = df[common_cols].fillna(0).sample(min(1500, len(df)), random_state=RANDOM_SEED)
     sv2     = explainer.shap_values(X_all2)
     if isinstance(sv2, list):
@@ -124,7 +107,6 @@ def main():
     print(f"Beeswarm -> {FIGURES_DIR / 'shap_beeswarm.png'}")
 
     print("\nTüm SHAP analizleri tamamlandı.")
-
 
 if __name__ == "__main__":
     main()

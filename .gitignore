@@ -1,57 +1,50 @@
-# Data klasörü — büyük dosyalar, repo'ya girmiyor
-data/apks/
-data/dynamic_logs/
-data/features/
-data/features_old/
-data/metadata.csv
-data/*.csv.gz
-data/*.gz
-
-# Modeller
-models/
-
-# Python cache
+# Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 *.pyd
-.Python
-*.egg-info/
-dist/
-build/
-.eggs/
+*.pyo
 
-# Sanal ortam
+# Virtual environments
+.venv/
 venv/
 env/
-.venv/
+ENV/
 
-# IDE
-.vscode/
+# IDE / editor
 .idea/
-*.swp
+.vscode/
 
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# OS
-.DS_Store
-Thumbs.db
-
-# API anahtarları — KESİNLİKLE repo'ya girmesin
+# Environment files
 .env
-secrets.py
-api_keys.txt
+.env.*
 
-# Geçici build klasörleri
-docxbuild/
-node_modules/
-*.lock
-package-lock.json
+# Build / distribution
+build/
+dist/
+*.egg-info/
+.eggs/
 
-# Frida araçları ve derlenmiş bundle (source kontrolunda değil)
+# Logs
+*.log
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Generated outputs / large data
+models/
+results/
+data/dynamic_logs/
+data/datasets_fnl/
+data/features_final_training_fnl.zip
+src/06_deneyler/sonuclar/
+frida_project/hooks_bundle.js
+
+# Optional large binaries
 frida-server
 frida-server.xz
-frida_project/node_modules/
-frida_project/package-lock.json
+tools/frida-server
+
+# Temporary files
+*.tmp
+*.swp

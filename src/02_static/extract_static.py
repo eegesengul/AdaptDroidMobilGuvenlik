@@ -1,9 +1,3 @@
-﻿"""
-Androguard ile statik feature extraction.
-Kullanım:
-    python extract_static.py
-    python extract_static.py --workers 4
-"""
 import argparse
 import sys
 import os
@@ -20,7 +14,6 @@ from tqdm import tqdm
 
 from config import METADATA_CSV, STATIC_PARQUET, FEATURES_DIR
 
-# ── İzlenecek Android izinleri (binary feature) ───────────
 PERMISSIONS = [
     "READ_SMS", "SEND_SMS", "RECEIVE_SMS", "READ_CALL_LOG",
     "WRITE_CALL_LOG", "PROCESS_OUTGOING_CALLS", "READ_CONTACTS",
@@ -45,7 +38,6 @@ PERMISSIONS = [
     "BIND_NOTIFICATION_LISTENER_SERVICE",
 ]
 
-# ── İzlenecek tehlikeli API çağrıları ──────────────────────
 DANGEROUS_APIS = [
     "getDeviceId", "getSubscriberId", "getSimSerialNumber",
     "getImei", "getMeid", "sendTextMessage", "sendMultipartTextMessage",
@@ -81,7 +73,6 @@ DANGEROUS_APIS = [
     "addJavascriptInterface",
 ]
 
-
 def extract_features(apk_path: str) -> dict | None:
     try:
         import logging; logging.getLogger("androguard").setLevel(logging.ERROR)
@@ -90,12 +81,10 @@ def extract_features(apk_path: str) -> dict | None:
         a, d, dx = AnalyzeAPK(apk_path)
 
         declared_perms = set(a.get_permissions())
-        # class_name + name + descriptor — disassembly olmadan, hızlı
         all_code = " ".join(
             f"{m.class_name} {m.name} {m.descriptor}"
             for m in dx.get_methods()
         )
-        # Androguard 4.x: strings DEX nesnesinde, APK'da değil
         str_list = []
         if isinstance(d, list):
             for dex in d:
@@ -103,7 +92,6 @@ def extract_features(apk_path: str) -> dict | None:
         elif d is not None:
             str_list = [str(s) for s in d.get_strings()]
 
-        # ── 1. İzinler (binary) ───────────────────────────
         perm_feats = {
             f"perm_{p}": int(
                 f"android.permission.{p}" in declared_perms or p in declared_perms
@@ -111,13 +99,11 @@ def extract_features(apk_path: str) -> dict | None:
             for p in PERMISSIONS
         }
 
-        # ── 2. API çağrıları (binary) ─────────────────────
         api_feats = {
             f"api_{a_name}": int(a_name in all_code)
             for a_name in DANGEROUS_APIS
         }
 
-        # ── 3. Reflection ─────────────────────────────────
         ref_feats = {
             "ref_getDeclaredMethod": int("getDeclaredMethod" in all_code),
             "ref_invoke":            int(".invoke(" in all_code),
@@ -126,7 +112,6 @@ def extract_features(apk_path: str) -> dict | None:
             "ref_newInstance":       int("newInstance" in all_code),
         }
 
-        # ── 4. DEX / kod özellikleri ──────────────────────
         classes     = list(dx.get_classes())
         methods     = list(dx.get_methods())
         num_classes = len(classes)
@@ -150,7 +135,6 @@ def extract_features(apk_path: str) -> dict | None:
             "dex_methods_per_class":  round(num_methods / max(num_classes, 1), 2),
         }
 
-        # ── 5. Anti-analiz / anti-emülatör ───────────────
         anti_feats = {
             "anti_isEmulator":          int("isEmulator" in all_code),
             "anti_FINGERPRINT":         int("FINGERPRINT" in all_code),
@@ -165,7 +149,6 @@ def extract_features(apk_path: str) -> dict | None:
                                            "substrate" in all_code.lower()),
         }
 
-        # ── 6. Obfuscation ────────────────────────────────
         class_names = [str(c.name) for c in classes]
         short_names = [n for n in class_names if len(n.split("/")[-1]) <= 2]
         obf_feats = {
@@ -185,7 +168,6 @@ def extract_features(apk_path: str) -> dict | None:
                                             all(p.isdigit() for p in s.split("."))),
         }
 
-        # ── 7. Manifest bileşenleri ───────────────────────
         try:
             activities  = a.get_activities()  or []
             services    = a.get_services()    or []
@@ -217,14 +199,12 @@ def extract_features(apk_path: str) -> dict | None:
                                                if "exported" in str(a.get_intent_filters("activity", act) or "")),
         }
 
-        # ── 8. APK dosya özellikleri ──────────────────────
         apk_size_kb = round(os.path.getsize(apk_path) / 1024, 1)
         file_feats = {
             "file_size_kb": apk_size_kb,
             "file_size_mb": round(apk_size_kb / 1024, 2),
         }
 
-        # ── 9. Network / URL özellikler ───────────────────
         suspicious_domains = ["pastebin", "ngrok", "bit.ly", "tinyurl", "duckdns",
                                ".ru", ".cn", ".tk", ".top", "no-ip"]
         network_feats = {
@@ -257,14 +237,12 @@ def extract_features(apk_path: str) -> dict | None:
     except Exception:
         return None
 
-
 def process_row(row):
     feats = extract_features(row["apk_path"])
     if feats is None:
         return None
     feats["sha256"] = row["sha256"]
     return feats
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -284,7 +262,6 @@ def main():
 
     from pathlib import Path
 
-    # ── APK kaynağı: klasör mü, metadata mü? ──────────────
     if args.apk_dir:
         apk_dir = Path(args.apk_dir)
         apk_files = sorted(apk_dir.glob("*.apk"))
@@ -305,12 +282,11 @@ def main():
         else:
             print(f"Toplam APK: {len(meta):,}")
 
-    # ── Çıktı yolu ─────────────────────────────────────────
     if args.out:
         out_path = Path(args.out)
         out_dir  = out_path.parent
     elif args.apk_dir:
-        tag      = Path(args.apk_dir).name          # klasör adı (orn: 2023)
+        tag      = Path(args.apk_dir).name
         lbl      = "benign" if args.label == 0 else "malware"
         out_dir  = FEATURES_DIR / "static_features" / lbl / tag
         out_path = out_dir / "static_features.parquet"
@@ -369,7 +345,6 @@ def main():
     for prefix in ["perm_", "api_", "ref_", "dex_", "anti_", "obf_", "manifest_", "file_", "net_"]:
         count = sum(1 for c in df_new.columns if c.startswith(prefix))
         print(f"  {prefix:<12} {count:>3} özellik")
-
 
 if __name__ == "__main__":
     main()
